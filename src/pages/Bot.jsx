@@ -31,35 +31,48 @@ class DexArbitrageEngine {
       gasUsed: 0
     };
     
-    // Environment variables for live trading
-    this.privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
-    this.rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
-    this.walletAddress = import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
-
+    // Environment variables for live trading - check them properly
     console.log('🔍 Checking environment variables...');
-    console.log('🔑 Private Key Status:', this.privateKey ? `Found (${this.privateKey.slice(0, 6)}...${this.privateKey.slice(-4)})` : 'NOT_FOUND');
-    console.log('🌐 RPC URL Status:', this.rpcUrl ? `Found (${this.rpcUrl.slice(0, 30)}...)` : 'NOT_FOUND');
-    console.log('🏠 Wallet Address Status:', this.walletAddress ? `Found (${this.walletAddress.slice(0, 6)}...${this.walletAddress.slice(-4)})` : 'NOT_FOUND');
     
-    this.paperTrading = !this.privateKey || !this.rpcUrl || !this.walletAddress;
+    const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+    const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
+    const walletAddress = import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
+    
+    console.log('🔑 Private Key Status:', privateKey ? `Found (${privateKey.slice(0, 6)}...${privateKey.slice(-4)})` : 'NOT_FOUND');
+    console.log('🌐 RPC URL Status:', rpcUrl ? `Found (${rpcUrl.slice(0, 30)}...)` : 'NOT_FOUND');
+    console.log('🏠 Wallet Address Status:', walletAddress ? `Found (${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)})` : 'NOT_FOUND');
+    
+    this.privateKey = privateKey;
+    this.rpcUrl = rpcUrl;
+    this.walletAddress = walletAddress;
+    
+    // Determine if we should use paper trading
+    this.paperTrading = !privateKey || !rpcUrl || !walletAddress;
     this.web3Connected = false;
     this.realBalances = { maticBalance: 0, usdcBalance: 0 };
 
     console.log('🚀 Initializing DEX Arbitrage Bot...');
     console.log('📊 Trading Mode:', this.paperTrading ? '📝 PAPER TRADING' : '🔴 LIVE TRADING');
+    
+    if (this.paperTrading) {
+      console.log('⚠️ Missing environment variables:');
+      if (!privateKey) console.log('   ❌ VITE_WALLET_PRIVATE_KEY not set');
+      if (!rpcUrl) console.log('   ❌ VITE_POLYGON_RPC_URL not set');
+      if (!walletAddress) console.log('   ❌ VITE_WALLET_PUBLIC_ADDRESS not set');
+      console.log('   📝 Falling back to paper trading mode');
+    }
   }
 
   async initializeConnection() {
     if (this.paperTrading) {
-      console.log('⚠️ Missing credentials - staying in paper trading mode');
-      if (!this.privateKey) console.log('   - VITE_WALLET_PRIVATE_KEY is missing');
-      if (!this.rpcUrl) console.log('   - VITE_POLYGON_RPC_URL is missing');
-      if (!this.walletAddress) console.log('   - VITE_WALLET_PUBLIC_ADDRESS is missing');
+      console.log('📝 Paper trading mode - skipping blockchain connection');
       return false;
     }
 
     try {
-      console.log('🔄 Testing RPC connection...');
+      console.log('🔄 Attempting to connect to blockchain...');
+      console.log(`🌐 RPC URL: ${this.rpcUrl.slice(0, 50)}...`);
+      console.log(`💰 Wallet: ${this.walletAddress}`);
       
       const response = await fetch(this.rpcUrl, {
         method: 'POST',
@@ -73,33 +86,42 @@ class DexArbitrageEngine {
       });
       
       const data = await response.json();
+      
       if (data.result) {
         this.web3Connected = true;
         const blockNumber = parseInt(data.result, 16);
-        console.log('✅ Connected to Polygon! Current block:', blockNumber);
-        console.log('💰 Using wallet address:', this.walletAddress);
+        console.log('✅ Successfully connected to Polygon network!');
+        console.log(`📊 Current block number: ${blockNumber.toLocaleString()}`);
+        console.log('💰 Ready to fetch real wallet balances...');
         
         await this.fetchRealBalances();
         
         return true;
+      } else {
+        console.error('❌ RPC returned error:', data);
+        throw new Error(`RPC Error: ${data.error?.message || 'Unknown error'}`);
       }
+      
     } catch (error) {
-      console.error('❌ RPC connection failed:', error);
+      console.error('❌ Failed to connect to blockchain:', error.message);
+      console.log('📝 Switching to paper trading mode as fallback');
       this.paperTrading = true;
+      this.web3Connected = false;
       return false;
     }
   }
 
   async fetchRealBalances() {
     if (!this.web3Connected || !this.walletAddress) {
-      console.log('⚠️ Cannot fetch balances - not connected or no address provided');
+      console.log('⚠️ Cannot fetch balances - connection or address missing');
       return { maticBalance: 0, usdcBalance: 0 };
     }
 
     try {
-      console.log(`💳 Fetching real wallet balances for ${this.walletAddress}...`);
+      console.log(`💳 Fetching balances for wallet: ${this.walletAddress}`);
 
       // Get MATIC balance
+      console.log('🔍 Checking MATIC balance...');
       const maticResponse = await fetch(this.rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -116,10 +138,13 @@ class DexArbitrageEngine {
       
       if (maticData.result) {
         maticBalance = parseInt(maticData.result, 16) / 1e18;
-        console.log('💎 MATIC balance:', maticBalance.toFixed(4), 'MATIC');
+        console.log(`💎 MATIC balance: ${maticBalance.toFixed(6)} MATIC`);
+      } else {
+        console.log('⚠️ Could not fetch MATIC balance:', maticData.error);
       }
 
       // Get USDC balance
+      console.log('🔍 Checking USDC balance...');
       const usdcContractAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // Polygon USDC
       const balanceOfSignature = '0x70a08231';
       const paddedAddress = this.walletAddress.slice(2).padStart(64, '0');
@@ -143,10 +168,13 @@ class DexArbitrageEngine {
       
       if (usdcData.result && usdcData.result !== '0x') {
         usdcBalance = parseInt(usdcData.result, 16) / 1e6; // USDC has 6 decimals
-        console.log('💵 USDC balance:', usdcBalance.toFixed(2), 'USDC');
+        console.log(`💵 USDC balance: ${usdcBalance.toFixed(2)} USDC`);
+      } else {
+        console.log('⚠️ Could not fetch USDC balance or balance is 0');
       }
 
       this.realBalances = { maticBalance, usdcBalance };
+      console.log('✅ Balance fetch completed:', this.realBalances);
       return this.realBalances;
 
     } catch (error) {
@@ -158,17 +186,19 @@ class DexArbitrageEngine {
   async initialize(config) {
     this.config = config;
     
-    // Initialize connection and fetch balances
+    // Try to connect to blockchain and get real balances
     const connected = await this.initializeConnection();
     
-    if (connected) {
+    if (connected && !this.paperTrading) {
       console.log('🎯 Bot initialized in LIVE TRADING mode');
       console.log('💰 Current balances:', this.realBalances);
+      return this.realBalances;
     } else {
       console.log('📝 Bot initialized in PAPER TRADING mode');
+      // If paper trading, ensure balances are zero
+      this.realBalances = { maticBalance: 0, usdcBalance: 0 };
+      return this.realBalances; 
     }
-    
-    return this.realBalances;
   }
 
   async scanForOpportunities() {
@@ -554,7 +584,7 @@ export default function BotPage() {
     return <div className="p-6">Loading Bot Controller...</div>;
   }
 
-  const isMissingAddress = !import.meta.env.VITE_WALLET_PUBLIC_ADDRESS && !botEngine.paperTrading;
+  const isMissingAddress = !import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
@@ -604,7 +634,7 @@ export default function BotPage() {
             ) : (
               <Button 
                 onClick={handleStartBot}
-                disabled={!botConfig || isMissingAddress}
+                disabled={!botConfig}
                 className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 flex items-center gap-2 w-32"
               >
                 <Play className="w-4 h-4" />
@@ -619,7 +649,8 @@ export default function BotPage() {
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              <strong>Action Required:</strong> Your `VITE_WALLET_PUBLIC_ADDRESS` is not set. The bot cannot fetch your balances, and will not start in live trading mode. Please add it to your environment variables (e.g., in Vercel) and redeploy.
+              <strong>Action Required:</strong> Your `VITE_WALLET_PUBLIC_ADDRESS` environment variable is missing. 
+              Please add your wallet's public address (0x...) in Vercel environment variables and redeploy.
             </AlertDescription>
           </Alert>
         )}
