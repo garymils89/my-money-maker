@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { motion } from "framer-motion";
@@ -12,6 +13,7 @@ import MarketOverview from "../components/dashboard/MarketOverview";
 export default function Dashboard() {
   const [opportunities, setOpportunities] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
+  const [executions, setExecutions] = useState([]); // Add state for executions
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
 
@@ -24,12 +26,14 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [oppData, portfolioData] = await Promise.all([
-        base44.entities.ArbitrageOpportunity.list(),
-        base44.entities.Portfolio.list()
+      const [oppData, portfolioData, execData] = await Promise.all([
+        base44.entities.ArbitrageOpportunity.list({ filter: { status: 'active' } }),
+        base44.entities.Portfolio.list(),
+        base44.entities.BotExecution.list({ sort: '-created_date', limit: 1000 }) // FIXED: Read from BotExecution instead of Trade
       ]);
       setOpportunities(oppData);
       setPortfolio(portfolioData);
+      setExecutions(execData);
       setLastUpdated(new Date());
     } catch (error) {
       console.error("Error loading data:", error);
@@ -38,21 +42,51 @@ export default function Dashboard() {
     }
   };
 
-  const calculateStats = () => {
+  const calculateStats = (executions) => {
     const totalPortfolio = portfolio.reduce((sum, p) => sum + (p.current_value || 0), 0);
     const totalInvested = portfolio.reduce((sum, p) => sum + (p.total_invested || 0), 0);
     const portfolioChange = totalInvested > 0 ? ((totalPortfolio - totalInvested) / totalInvested) * 100 : 0;
     
-    const activeOpportunities = opportunities.filter(o => o.status === 'active').length;
+    const activeOpportunities = opportunities.length;
     const bestOpportunity = Math.max(...opportunities.map(o => o.profit_percentage || 0), 0);
+
+    // --- DYNAMIC PROFIT CALCULATION FROM LIVE BOT DATA ---
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+
+    const isSameDay = (date1, date2) => date1.toDateString() === date2.toDateString();
+
+    // Filter actual trade executions from your live bot
+    const todayTrades = executions.filter(e => 
+      e.execution_type === 'trade' && 
+      e.status === 'completed' && 
+      isSameDay(new Date(e.created_date), today)
+    );
     
+    const yesterdayTrades = executions.filter(e => 
+      e.execution_type === 'trade' && 
+      e.status === 'completed' && 
+      isSameDay(new Date(e.created_date), yesterday)
+    );
+
+    const todayProfit = todayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
+    const yesterdayProfit = yesterdayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
+
+    let profitChange = 0;
+    if (yesterdayProfit !== 0) {
+      profitChange = ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100;
+    } else if (todayProfit > 0) {
+      profitChange = 100; // If yesterday's profit was 0 and today's is positive, it's a 100% increase
+    }
+
     return {
       totalPortfolio,
       portfolioChange,
       activeOpportunities,
       bestOpportunity,
-      todayProfit: 520, // This would come from trades data
-      profitChange: 12.5
+      todayProfit: todayProfit,
+      profitChange: parseFloat(profitChange.toFixed(1))
     };
   };
 
@@ -105,7 +139,7 @@ export default function Dashboard() {
         </Alert>
 
         {/* Stats Grid */}
-        <StatsGrid stats={calculateStats()} />
+        <StatsGrid stats={calculateStats(executions)} />
 
         {/* Main Content Grid */}
         <div className="grid lg:grid-cols-3 gap-6">
