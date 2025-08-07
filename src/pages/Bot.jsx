@@ -31,46 +31,31 @@ class DexArbitrageEngine {
       gasUsed: 0
     };
     
-    // Environment variables for live trading - check them properly
-    console.log('🔍 Checking environment variables...');
-    
-    const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
-    const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
-    const walletAddress = import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
-    
-    console.log('🔑 Private Key Status:', privateKey ? `Found (${privateKey.slice(0, 6)}...${privateKey.slice(-4)})` : 'NOT_FOUND');
-    console.log('🌐 RPC URL Status:', rpcUrl ? `Found (${rpcUrl.slice(0, 30)}...)` : 'NOT_FOUND');
-    console.log('🏠 Wallet Address Status:', walletAddress ? `Found (${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)})` : 'NOT_FOUND');
-    
-    this.privateKey = privateKey;
-    this.rpcUrl = rpcUrl;
-    this.walletAddress = walletAddress;
-    
-    // Determine if we should use paper trading
-    this.paperTrading = !privateKey || !rpcUrl || !walletAddress;
+    // Environment variables for live trading
+    this.privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+    this.rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
+    this.walletAddress = import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
+
+    // Check for environment variables
+    this.paperTrading = !this.privateKey || !this.rpcUrl || !this.walletAddress;
     this.web3Connected = false;
     this.realBalances = { maticBalance: 0, usdcBalance: 0 };
 
     console.log('🚀 Initializing DEX Arbitrage Bot...');
-    console.log('📊 Trading Mode:', this.paperTrading ? '📝 PAPER TRADING' : '🔴 LIVE TRADING');
-    
-    if (this.paperTrading) {
-      console.log('⚠️ Missing environment variables:');
-      if (!privateKey) console.log('   ❌ VITE_WALLET_PRIVATE_KEY not set');
-      if (!rpcUrl) console.log('   ❌ VITE_POLYGON_RPC_URL not set');
-      if (!walletAddress) console.log('   ❌ VITE_WALLET_PUBLIC_ADDRESS not set');
-      console.log('   📝 Falling back to paper trading mode');
-    }
+    console.log('📊 Trading Mode:', this.paperTrading ? '📝 PAPER TRADING' : '🔴 LIVE SIMULATION');
   }
 
   async initializeConnection() {
     if (this.paperTrading) {
-      console.log('📝 Paper trading mode - skipping blockchain connection');
+      console.log('⚠️ Missing credentials - staying in paper trading mode');
+      if (!this.privateKey) console.log('   - VITE_WALLET_PRIVATE_KEY is missing');
+      if (!this.rpcUrl) console.log('   - VITE_POLYGON_RPC_URL is missing');
+      if (!this.walletAddress) console.log('   - VITE_WALLET_PUBLIC_ADDRESS is missing');
       return false;
     }
 
     try {
-      console.log('🔄 Attempting to connect to blockchain...');
+      console.log('🔄 Testing RPC connection...');
       console.log(`🌐 RPC URL: ${this.rpcUrl.slice(0, 50)}...`);
       console.log(`💰 Wallet: ${this.walletAddress}`);
       
@@ -90,9 +75,7 @@ class DexArbitrageEngine {
       if (data.result) {
         this.web3Connected = true;
         const blockNumber = parseInt(data.result, 16);
-        console.log('✅ Successfully connected to Polygon network!');
-        console.log(`📊 Current block number: ${blockNumber.toLocaleString()}`);
-        console.log('💰 Ready to fetch real wallet balances...');
+        console.log('✅ Connected to Polygon! Current block:', blockNumber);
         
         await this.fetchRealBalances();
         
@@ -111,17 +94,43 @@ class DexArbitrageEngine {
     }
   }
 
+  async fetchERC20Balance(contractAddress, decimals) {
+    try {
+      const balanceOfSignature = '0x70a08231';
+      const paddedAddress = this.walletAddress.slice(2).padStart(64, '0');
+      
+      const response = await fetch(this.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_call',
+          params: [{ to: contractAddress, data: balanceOfSignature + paddedAddress }, 'latest'],
+          id: 1
+        })
+      });
+
+      const data = await response.json();
+      if (data.result && data.result !== '0x') {
+        return parseInt(data.result, 16) / (10 ** decimals);
+      }
+      return 0;
+    } catch (error) {
+      console.error(`Error fetching balance for ${contractAddress}:`, error);
+      return 0;
+    }
+  }
+
   async fetchRealBalances() {
     if (!this.web3Connected || !this.walletAddress) {
-      console.log('⚠️ Cannot fetch balances - connection or address missing');
+      console.log('⚠️ Cannot fetch balances - not connected or no address provided');
       return { maticBalance: 0, usdcBalance: 0 };
     }
 
     try {
-      console.log(`💳 Fetching balances for wallet: ${this.walletAddress}`);
+      console.log(`💳 Fetching real wallet balances for ${this.walletAddress}...`);
 
       // Get MATIC balance
-      console.log('🔍 Checking MATIC balance...');
       const maticResponse = await fetch(this.rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -132,46 +141,21 @@ class DexArbitrageEngine {
           id: 1
         })
       });
-
       const maticData = await maticResponse.json();
-      let maticBalance = 0;
-      
-      if (maticData.result) {
-        maticBalance = parseInt(maticData.result, 16) / 1e18;
-        console.log(`💎 MATIC balance: ${maticBalance.toFixed(6)} MATIC`);
-      } else {
-        console.log('⚠️ Could not fetch MATIC balance:', maticData.error);
-      }
+      const maticBalance = maticData.result ? (parseInt(maticData.result, 16) / 1e18) : 0;
+      console.log(`💎 MATIC balance: ${maticBalance.toFixed(4)} MATIC`);
 
-      // Get USDC balance
-      console.log('🔍 Checking USDC balance...');
-      const usdcContractAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // Polygon USDC
-      const balanceOfSignature = '0x70a08231';
-      const paddedAddress = this.walletAddress.slice(2).padStart(64, '0');
-      
-      const usdcResponse = await fetch(this.rpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'eth_call',
-          params: [{
-            to: usdcContractAddress,
-            data: balanceOfSignature + paddedAddress
-          }, 'latest'],
-          id: 2
-        })
-      });
+      // Get USDC balance from both known addresses
+      const usdcNativeAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // Native USDC (PoS USDC)
+      const usdcBridgedAddress = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'; // Bridged USDC.e (ERC-20 from Ethereum)
 
-      const usdcData = await usdcResponse.json();
-      let usdcBalance = 0;
+      console.log('🔍 Checking for native USDC...');
+      const nativeUsdc = await this.fetchERC20Balance(usdcNativeAddress, 6);
+      console.log('🔍 Checking for bridged USDC.e...');
+      const bridgedUsdc = await this.fetchERC20Balance(usdcBridgedAddress, 6);
       
-      if (usdcData.result && usdcData.result !== '0x') {
-        usdcBalance = parseInt(usdcData.result, 16) / 1e6; // USDC has 6 decimals
-        console.log(`💵 USDC balance: ${usdcBalance.toFixed(2)} USDC`);
-      } else {
-        console.log('⚠️ Could not fetch USDC balance or balance is 0');
-      }
+      const usdcBalance = nativeUsdc + bridgedUsdc;
+      console.log(`💵 Total USDC balance: ${usdcBalance.toFixed(2)} USDC`);
 
       this.realBalances = { maticBalance, usdcBalance };
       console.log('✅ Balance fetch completed:', this.realBalances);
@@ -190,12 +174,12 @@ class DexArbitrageEngine {
     const connected = await this.initializeConnection();
     
     if (connected && !this.paperTrading) {
-      console.log('🎯 Bot initialized in LIVE TRADING mode');
+      console.log('🎯 Bot initialized in LIVE SIMULATION mode');
       console.log('💰 Current balances:', this.realBalances);
       return this.realBalances;
     } else {
       console.log('📝 Bot initialized in PAPER TRADING mode');
-      // If paper trading, ensure balances are zero
+      // If paper trading or connection failed, ensure balances are zero for the simulation
       this.realBalances = { maticBalance: 0, usdcBalance: 0 };
       return this.realBalances; 
     }
@@ -228,7 +212,8 @@ class DexArbitrageEngine {
       }
     ].map(opp => {
       const profitPercentage = ((opp.sellPrice - opp.buyPrice) / opp.buyPrice) * 100;
-      const tradeAmount = Math.min(this.realBalances.usdcBalance * 0.1, 500); // Use 10% of balance or max $500
+      // Use max_position_size as a percentage of the current USDC balance, default to 10%
+      const tradeAmount = Math.min(this.realBalances.usdcBalance * ((this.config?.max_position_size || 10) / 100), 500); 
       const netProfitUsd = tradeAmount * (profitPercentage / 100);
       
       return {
@@ -248,69 +233,62 @@ class DexArbitrageEngine {
   }
 
   async executeRealTrade(opportunity) {
-    console.log(`🎯 ATTEMPTING REAL TRADE: ${opportunity.pair} | ${opportunity.profitPercentage.toFixed(4)}%`);
+    console.log(`🎯 ATTEMPTING TRADE: ${opportunity.pair} | ${opportunity.profitPercentage.toFixed(4)}%`);
     
     if (this.paperTrading) {
       console.log('📝 Paper trading mode - simulating execution');
-      return await this.simulateTrade(opportunity);
+      return await this.simulateTrade(opportunity, true);
     }
 
-    // REAL TRADING LOGIC
-    console.log('🔴 LIVE TRADING MODE ACTIVATED');
+    // LIVE TRADING (SIMULATION) LOGIC
+    console.log('🔴 LIVE SIMULATION MODE ENGAGED');
     console.log('💰 Trade amount:', opportunity.tradeAmount, 'USDC');
     console.log('⛽ Estimated gas:', opportunity.gasEstimate, 'MATIC');
 
     try {
-      // Pre-flight checks
+      // Pre-flight checks with real balances
       if (this.realBalances.usdcBalance < opportunity.tradeAmount) {
-        throw new Error(`Insufficient USDC balance: ${this.realBalances.usdcBalance} < ${opportunity.tradeAmount}`);
+        throw new Error(`Insufficient USDC balance: ${this.realBalances.usdcBalance.toFixed(2)} < ${opportunity.tradeAmount.toFixed(2)}`);
       }
       
-      if (this.realBalances.maticBalance < opportunity.gasEstimate * 2) {
-        throw new Error(`Insufficient MATIC for gas: ${this.realBalances.maticBalance} < ${opportunity.gasEstimate * 2}`);
+      if (this.realBalances.maticBalance < opportunity.gasEstimate * 2) { // Check for sufficient MATIC for gas
+        throw new Error(`Insufficient MATIC for gas: ${this.realBalances.maticBalance.toFixed(4)} < ${opportunity.gasEstimate * 2}`);
       }
 
       console.log('✅ Pre-flight checks passed');
       
-      // For now, simulate the trade but mark it as a real attempt
-      // In a full implementation, this would:
-      // 1. Build the transaction data for DEX swaps
-      // 2. Sign the transaction with private key
-      // 3. Send to network via RPC call
-      // 4. Wait for confirmation
+      // Since we cannot safely sign and broadcast transactions in a web browser,
+      // we will simulate the trade even in "live" mode.
+      console.log('🤖 SIMULATING live trade execution as real transaction signing is not available.');
       
-      console.log('⚠️ REAL TRADING NOT FULLY IMPLEMENTED YET');
-      console.log('📝 Falling back to simulation with real balance updates');
+      const result = await this.simulateTrade(opportunity, false);
       
-      const result = await this.simulateTrade(opportunity);
-      
-      // Update real balances to simulate the trade effect
+      // Update real balances to reflect the *simulated* trade
       if (result.success) {
         this.realBalances.usdcBalance += result.profit;
         this.realBalances.maticBalance -= result.gasUsed;
-        console.log('💰 Updated balances after trade:', this.realBalances);
+        console.log('💰 Updated balances after simulated trade:', this.realBalances);
       }
       
-      result.realTradeAttempt = true;
-      result.note = 'Real trade attempted but simulated pending full implementation';
+      result.note = 'Live trade simulated. No real transaction was sent.';
       
       return result;
       
     } catch (error) {
-      console.error('❌ Real trade failed:', error.message);
+      console.error('❌ Trade failed during pre-flight checks or simulation:', error.message);
       return {
         success: false,
-        profit: -opportunity.gasEstimate * 0.7,
-        gasUsed: opportunity.gasEstimate * 0.3,
+        profit: 0, // No profit if pre-flight fails
+        gasUsed: 0, // No gas used if pre-flight fails
         error: error.message,
         realTradeAttempt: true,
-        txHash: '0xfailed' + Math.random().toString(16).substr(2, 60),
+        txHash: '0xfailed_preflight_' + Math.random().toString(16).substr(2, 50),
         executionTime: Date.now()
       };
     }
   }
 
-  async simulateTrade(opportunity) {
+  async simulateTrade(opportunity, isPaperTrade) {
     // Realistic simulation with market conditions
     const success = Math.random() > 0.12; // 88% success rate
     const slippageImpact = opportunity.netProfitUsd * (Math.random() * 0.1);
@@ -325,9 +303,9 @@ class DexArbitrageEngine {
       success,
       profit: parseFloat(actualProfit.toFixed(4)),
       gasUsed: parseFloat(opportunity.gasEstimate.toFixed(4)),
-      txHash: '0x' + Math.random().toString(16).substr(2, 64),
-      paperTrade: this.paperTrading,
-      realTradeAttempt: false,
+      txHash: '0xsimulated_' + Math.random().toString(16).substr(2, 54),
+      paperTrade: isPaperTrade,
+      realTradeAttempt: !isPaperTrade,
       slippage: parseFloat(slippageImpact.toFixed(4)),
       executionTime: Date.now()
     };
@@ -418,7 +396,7 @@ export default function BotPage() {
         }
       };
       
-      if (opps.length > 0 && opps[0].profitPercentage > (botConfig?.min_profit_threshold || 0.2)) {
+      if (opps.length > 0 && opps[0].netProfitUsd > 0) { // Execute only if there's a positive net profit
         console.log('💎 Executing best opportunity:', opps[0]);
         
         const tradeResult = await botEngine.executeArbitrageTrade(opps[0]);
@@ -473,7 +451,7 @@ export default function BotPage() {
         const defaultConfig = { 
           bot_name: 'DEX Arbitrage Bot', 
           min_profit_threshold: 0.15,
-          max_position_size: 500,
+          max_position_size: 10, // Default to 10% of balance for trade amount
           daily_loss_limit: 50
         };
         const createdConfig = await base44.entities.BotConfig.create(defaultConfig);
@@ -500,12 +478,13 @@ export default function BotPage() {
     
     if (!botEngine.paperTrading) {
       const confirmed = window.confirm(
-        `⚠️ LIVE TRADING MODE ACTIVATED\n\n` +
+        `⚠️ LIVE TRADING MODE (SIMULATED)\n\n` +
         `Wallet: ${botEngine.walletAddress}\n` +
         `MATIC Balance: ${currentBalances.maticBalance?.toFixed(4)} MATIC\n` +
         `USDC Balance: ${currentBalances.usdcBalance?.toFixed(2)} USDC\n\n` +
-        `This bot will execute REAL TRADES with your funds.\n` +
-        `Are you absolutely sure you want to proceed?`
+        `This bot will run a LIVE SIMULATION with your real balances.\n` +
+        `No real funds will be moved on-chain. Simulated trades will adjust balances locally.\n` +
+        `Are you sure you want to proceed?`
       );
       if (!confirmed) return;
     }
@@ -522,7 +501,7 @@ export default function BotPage() {
       execution_type: 'alert', 
       status: 'completed', 
       details: { 
-        alert_type: botEngine.paperTrading ? 'Paper Trading Bot Started' : '🔴 LIVE TRADING Bot Started',
+        alert_type: botEngine.paperTrading ? 'Paper Trading Bot Started' : '🔴 LIVE SIMULATION Bot Started',
         wallet_address: botEngine.walletAddress,
         initial_balances: currentBalances
       } 
@@ -600,7 +579,7 @@ export default function BotPage() {
               <p className="text-slate-600">
                 Automated trading across Polygon DEXs - 
                 <Badge className={`${botEngine.paperTrading ? "bg-blue-100 text-blue-800" : "bg-red-100 text-red-800"} ml-2`}>
-                  {botEngine.paperTrading ? "📝 PAPER TRADING" : "🔴 LIVE TRADING"}
+                  {botEngine.paperTrading ? "📝 PAPER TRADING" : "🔴 LIVE SIMULATION"}
                 </Badge>
               </p>
               {walletInfo && (walletInfo.maticBalance > 0 || walletInfo.usdcBalance > 0) && (
@@ -644,7 +623,6 @@ export default function BotPage() {
           </div>
         </div>
 
-        {/* NEW: Missing Public Address Alert */}
         {isMissingAddress && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
@@ -655,7 +633,6 @@ export default function BotPage() {
           </Alert>
         )}
 
-        {/* Status Alert */}
         {isRunning && (
           <Alert className="mb-6 border-emerald-200 bg-emerald-50">
             <Zap className="w-4 h-4" />
@@ -663,7 +640,7 @@ export default function BotPage() {
               <strong>Bot is Running:</strong> Scanning every 15 seconds. 
               Stats: {dailyStats.trades} trades, ${dailyStats.profit.toFixed(2)} profit, {dailyStats.gasUsed.toFixed(4)} MATIC gas.
               {botEngine.paperTrading && <strong> (PAPER TRADING)</strong>}
-              {!botEngine.paperTrading && <strong className="text-red-700"> (🔴 LIVE TRADING - Using real funds!)</strong>}
+              {!botEngine.paperTrading && <strong className="text-red-700"> (🔴 LIVE SIMULATION - No real funds are being moved)</strong>}
             </AlertDescription>
           </Alert>
         )}
@@ -688,7 +665,7 @@ export default function BotPage() {
                           Buy on {opp.buyDex} → Sell on {opp.sellDex}
                         </div>
                         <div className="text-xs text-slate-500">
-                          Trade Amount: ${opp.tradeAmount} • Gas: {opp.gasEstimate} MATIC
+                          Trade Amount: ${opp.tradeAmount.toFixed(2)} • Gas: {opp.gasEstimate} MATIC
                         </div>
                       </div>
                       <div className="text-right">
