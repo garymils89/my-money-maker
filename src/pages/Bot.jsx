@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,8 @@ import {
   Pause, 
   Activity, 
   Zap,
-  TrendingUp
+  TrendingUp,
+  AlertTriangle
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
@@ -32,14 +34,15 @@ class DexArbitrageEngine {
     // Environment variables for live trading
     this.privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
     this.rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
-    
+    this.walletAddress = import.meta.env.VITE_WALLET_PUBLIC_ADDRESS;
+
     console.log('🔍 Checking environment variables...');
     console.log('🔑 Private Key Status:', this.privateKey ? `Found (${this.privateKey.slice(0, 6)}...${this.privateKey.slice(-4)})` : 'NOT_FOUND');
     console.log('🌐 RPC URL Status:', this.rpcUrl ? `Found (${this.rpcUrl.slice(0, 30)}...)` : 'NOT_FOUND');
+    console.log('🏠 Wallet Address Status:', this.walletAddress ? `Found (${this.walletAddress.slice(0, 6)}...${this.walletAddress.slice(-4)})` : 'NOT_FOUND');
     
-    this.paperTrading = !this.privateKey || !this.rpcUrl;
+    this.paperTrading = !this.privateKey || !this.rpcUrl || !this.walletAddress;
     this.web3Connected = false;
-    this.walletAddress = null;
     this.realBalances = { maticBalance: 0, usdcBalance: 0 };
 
     console.log('🚀 Initializing DEX Arbitrage Bot...');
@@ -48,14 +51,16 @@ class DexArbitrageEngine {
 
   async initializeConnection() {
     if (this.paperTrading) {
-      console.log('⚠️ No credentials found - staying in paper trading mode');
+      console.log('⚠️ Missing credentials - staying in paper trading mode');
+      if (!this.privateKey) console.log('   - VITE_WALLET_PRIVATE_KEY is missing');
+      if (!this.rpcUrl) console.log('   - VITE_POLYGON_RPC_URL is missing');
+      if (!this.walletAddress) console.log('   - VITE_WALLET_PUBLIC_ADDRESS is missing');
       return false;
     }
 
     try {
       console.log('🔄 Testing RPC connection...');
       
-      // Test RPC connection
       const response = await fetch(this.rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -72,12 +77,8 @@ class DexArbitrageEngine {
         this.web3Connected = true;
         const blockNumber = parseInt(data.result, 16);
         console.log('✅ Connected to Polygon! Current block:', blockNumber);
+        console.log('💰 Using wallet address:', this.walletAddress);
         
-        // Derive wallet address (simplified for demo)
-        this.walletAddress = this.deriveWalletAddress();
-        console.log('💰 Derived wallet address:', this.walletAddress);
-        
-        // Fetch real balances
         await this.fetchRealBalances();
         
         return true;
@@ -89,27 +90,14 @@ class DexArbitrageEngine {
     }
   }
 
-  deriveWalletAddress() {
-    // Simple address derivation for demo (not cryptographically secure)
-    // In production, you'd use proper crypto libraries
-    if (!this.privateKey) return '0x0000000000000000000000000000000000000000';
-    
-    let hash = 0;
-    for (let i = 0; i < this.privateKey.length; i++) {
-      hash = ((hash << 5) - hash + this.privateKey.charCodeAt(i)) & 0xffffffff;
-    }
-    const addr = Math.abs(hash).toString(16).padStart(8, '0');
-    return `0x${addr}${'1234567890abcdef'.repeat(2).slice(0, 32)}`.slice(0, 42);
-  }
-
   async fetchRealBalances() {
     if (!this.web3Connected || !this.walletAddress) {
-      console.log('⚠️ Cannot fetch balances - not connected');
+      console.log('⚠️ Cannot fetch balances - not connected or no address provided');
       return { maticBalance: 0, usdcBalance: 0 };
     }
 
     try {
-      console.log('💳 Fetching real wallet balances...');
+      console.log(`💳 Fetching real wallet balances for ${this.walletAddress}...`);
 
       // Get MATIC balance
       const maticResponse = await fetch(this.rpcUrl, {
@@ -132,7 +120,7 @@ class DexArbitrageEngine {
       }
 
       // Get USDC balance
-      const usdcContractAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+      const usdcContractAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // Polygon USDC
       const balanceOfSignature = '0x70a08231';
       const paddedAddress = this.walletAddress.slice(2).padStart(64, '0');
       
@@ -566,6 +554,8 @@ export default function BotPage() {
     return <div className="p-6">Loading Bot Controller...</div>;
   }
 
+  const isMissingAddress = !import.meta.env.VITE_WALLET_PUBLIC_ADDRESS && !botEngine.paperTrading;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
@@ -614,7 +604,7 @@ export default function BotPage() {
             ) : (
               <Button 
                 onClick={handleStartBot}
-                disabled={!botConfig}
+                disabled={!botConfig || isMissingAddress}
                 className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 flex items-center gap-2 w-32"
               >
                 <Play className="w-4 h-4" />
@@ -623,6 +613,16 @@ export default function BotPage() {
             )}
           </div>
         </div>
+
+        {/* NEW: Missing Public Address Alert */}
+        {isMissingAddress && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Action Required:</strong> Your `VITE_WALLET_PUBLIC_ADDRESS` is not set. The bot cannot fetch your balances, and will not start in live trading mode. Please add it to your environment variables (e.g., in Vercel) and redeploy.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Status Alert */}
         {isRunning && (
