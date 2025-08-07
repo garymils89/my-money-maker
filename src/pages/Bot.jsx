@@ -408,7 +408,7 @@ export default function BotPage() {
 
   useEffect(() => {
     console.log('🎯 Live Trading Bot Page mounted');
-    loadInitialData();
+    loadInitialData(); // This will now load all historical executions
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
@@ -457,10 +457,10 @@ export default function BotPage() {
           }
         };
 
-        setExecutions(prev => [tradeExecution, scanExecution, ...prev.slice(0, 48)]);
+        setExecutions(prev => [tradeExecution, scanExecution, ...prev]); // REMOVED .slice() to keep all logs
         setWalletInfo(liveEngine.getCurrentBalances());
       } else {
-        setExecutions(prev => [scanExecution, ...prev.slice(0, 49)]);
+        setExecutions(prev => [scanExecution, ...prev]); // REMOVED .slice() to keep all logs
       }
 
       setDailyStats(liveEngine.getDailyStats());
@@ -475,13 +475,19 @@ export default function BotPage() {
         error_message: error.message,
         details: { error: error.message }
       };
-      setExecutions(prev => [errorExecution, ...prev.slice(0, 49)]);
+      setExecutions(prev => [errorExecution, ...prev]); // REMOVED .slice() to keep all logs
     }
   };
 
   const loadInitialData = async () => {
     try {
-      const configs = await base44.entities.BotConfig.list();
+      const [configs, historicalExecutions] = await Promise.all([
+        base44.entities.BotConfig.list(),
+        base44.entities.BotExecution.list({ sort: '-created_date', limit: 5000 }) // Load last 5000 events
+      ]);
+
+      setExecutions(historicalExecutions); // Set the historical logs
+
       let initialConfig = null;
       if (configs.length > 0) {
         initialConfig = configs[0];
@@ -674,7 +680,7 @@ export default function BotPage() {
             <Zap className="w-4 h-4" />
             <AlertDescription className={liveEngine.canTradeLive() ? 'text-red-800' : 'text-emerald-800'}>
               <strong>Bot Running:</strong> Scanning every 20 seconds.
-              Stats: {dailyStats.trades} trades, ${dailyStats.profit.toFixed(2)} profit, {dailyStats.gasUsed.toFixed(4)} MATIC gas.
+              Stats: {dailyStats.trades} trades, ${dailyStats.profit.toFixed(2)} profit, {dailyStats.loss.toFixed(2)} loss, {dailyStats.gasUsed.toFixed(4)} MATIC gas.
               {liveEngine.canTradeLive() ? <strong> (🚨 LIVE BLOCKCHAIN MODE)</strong> : <strong> (📝 SIMULATION)</strong>}
             </AlertDescription>
           </Alert>
