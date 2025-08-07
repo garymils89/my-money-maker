@@ -33,7 +33,9 @@ class DexArbitrageEngine {
       gasUsed: 0
     };
     // Production-ready: Use paper trading only if no private key is provided
-    this.paperTrading = !import.meta.env.VITE_WALLET_PRIVATE_KEY;
+    // FIX: Safely access import.meta.env to avoid crashing in environments that don't support it.
+    const privateKey = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_WALLET_PRIVATE_KEY : undefined;
+    this.paperTrading = !privateKey;
   }
 
   async initialize(config) {
@@ -131,7 +133,8 @@ export default function BotPage() {
   const [paperTradingMode, setPaperTradingMode] = useState(true);
 
   // --- DEBUG VARS FOR UI ---
-  const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+  // FIX: Safely access import.meta.env to prevent build errors
+  const privateKey = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_WALLET_PRIVATE_KEY : undefined;
   const isKeyDetected = privateKey && privateKey.length > 0;
   // --- END DEBUG VARS ---
 
