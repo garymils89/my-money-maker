@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,27 +31,56 @@ class DexArbitrageEngine {
       loss: 0,
       gasUsed: 0
     };
-    // Production-ready: Use paper trading only if no private key is provided
-    // FIX: Safely access import.meta.env to avoid crashing in environments that don't support it.
-    const privateKey = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_WALLET_PRIVATE_KEY : undefined;
+    
+    // Debug: Log environment check
+    console.log('🔍 Environment check:', typeof window !== 'undefined' ? 'browser' : 'server');
+    
+    // Safe environment variable access
+    let privateKey;
+    try {
+      // Check multiple ways to access the environment variable
+      if (typeof process !== 'undefined' && process.env) {
+        privateKey = process.env.VITE_WALLET_PRIVATE_KEY;
+        console.log('📝 Found process.env:', !!privateKey);
+      }
+      
+      if (!privateKey && typeof import !== 'undefined' && import.meta && import.meta.env) {
+        privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+        console.log('📝 Found import.meta.env:', !!privateKey);
+      }
+      
+      // Final fallback - check window object for Vite injected variables
+      if (!privateKey && typeof window !== 'undefined' && window.__VITE_ENV__) {
+        privateKey = window.__VITE_ENV__.VITE_WALLET_PRIVATE_KEY;
+        console.log('📝 Found window.__VITE_ENV__:', !!privateKey);
+      }
+      
+    } catch (error) {
+      console.log('⚠️ Environment variable access error:', error.message);
+    }
+    
+    this.privateKey = privateKey;
     this.paperTrading = !privateKey;
+    
+    console.log('🚀 Initializing DEX Arbitrage Bot...');
+    console.log('📊 Paper Trading Mode:', this.paperTrading ? 'ENABLED' : 'DISABLED');
+    console.log('🔑 Private Key Status:', privateKey ? 'DETECTED' : 'NOT_FOUND');
+    console.log('✅ Bot engine initialized');
   }
 
   async initialize(config) {
     this.config = config;
-    // No-op for local demo, no private key needed
     return true;
   }
 
   async scanForOpportunities() {
-    // Real DEX price scanning (simplified for demo)
     const opportunities = [
       {
         pair: 'USDC/USDT',
         buyDex: 'QuickSwap',
         sellDex: 'Uniswap V3',
         buyPrice: 0.9998,
-        sellPrice: 1.0021 + (Math.random() - 0.5) * 0.001, // Add randomness
+        sellPrice: 1.0021 + (Math.random() - 0.5) * 0.001,
         profitPercentage: 0.23,
         netProfitUsd: 2.76,
         riskLevel: 'low',
@@ -89,8 +117,7 @@ class DexArbitrageEngine {
       throw new Error('Daily loss limit reached');
     }
     
-    // Simulate trade results
-    const success = Math.random() > 0.1; // 90% success in paper trading
+    const success = Math.random() > 0.1;
     const actualProfit = success ? opportunity.netProfitUsd * (0.85 + Math.random() * 0.3) : -opportunity.gasEstimate * 0.65;
     
     if (actualProfit > 0) this.dailyStats.profit += actualProfit;
@@ -120,7 +147,6 @@ class DexArbitrageEngine {
   }
 }
 
-// Keep a single instance of the bot engine
 const botEngine = new DexArbitrageEngine();
 
 export default function BotPage() {
@@ -132,22 +158,14 @@ export default function BotPage() {
   const [loading, setLoading] = useState(true);
   const [paperTradingMode, setPaperTradingMode] = useState(true);
 
-  // --- DEBUG VARS FOR UI ---
-  // FIX: Safely access import.meta.env to prevent build errors
-  const privateKey = typeof import.meta.env !== 'undefined' ? import.meta.env.VITE_WALLET_PRIVATE_KEY : undefined;
-  const isKeyDetected = privateKey && privateKey.length > 0;
-  // --- END DEBUG VARS ---
-
-  // Use a ref for the interval to prevent issues with stale state in closures
   const intervalRef = useRef(null);
 
   useEffect(() => {
+    console.log('🎯 BotPage component mounted');
     loadInitialData();
-    // Set paper trading mode based on the engine's status
     setPaperTradingMode(botEngine.paperTrading);
 
     return () => {
-      // Cleanup on unmount
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
@@ -176,13 +194,13 @@ export default function BotPage() {
   };
 
   const loadInitialData = async () => {
+    console.log('🔄 Loading initial bot data...');
     try {
       const configs = await base44.entities.BotConfig.list();
       if (configs.length > 0) {
         setBotConfig(configs[0]);
         botEngine.initialize(configs[0]);
       } else {
-         // Create a default config if none exists
         const defaultConfig = { bot_name: 'DEX Arbitrage Bot', min_profit_threshold: 0.2 };
         const createdConfig = await base44.entities.BotConfig.create(defaultConfig);
         setBotConfig(createdConfig);
@@ -204,7 +222,6 @@ export default function BotPage() {
     botEngine.start();
     setIsRunning(true);
     
-    // Run the loop immediately, then set interval
     runBotLoop();
     intervalRef.current = setInterval(runBotLoop, 15000);
 
@@ -243,6 +260,16 @@ export default function BotPage() {
   if (loading) {
     return <div className="p-6">Loading Bot Controller...</div>;
   }
+
+  // Debug info - this will help us see what's happening
+  const debugInfo = {
+    hasPrivateKey: !!botEngine.privateKey,
+    privateKeyLength: botEngine.privateKey ? botEngine.privateKey.length : 0,
+    paperTrading: botEngine.paperTrading,
+    environmentType: typeof window !== 'undefined' ? 'browser' : 'server'
+  };
+
+  console.log('🐛 Debug Info:', debugInfo);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
@@ -297,7 +324,42 @@ export default function BotPage() {
           </div>
         </div>
 
-        {/* --- SYSTEM DIAGNOSTICS CARD --- */}
+        {/* DEBUG CARD - This should definitely show up */}
+        <Card className="mb-6 bg-red-50 border-red-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-800">
+              <AlertTriangle className="w-5 h-5" />
+              🐛 DEBUG INFORMATION (You Should See This Card!)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-red-900 space-y-2">
+            <div className="flex justify-between">
+              <span className="font-medium">Private Key Detected:</span>
+              <Badge className={debugInfo.hasPrivateKey ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                {debugInfo.hasPrivateKey ? '✅ YES' : '❌ NO'}
+              </Badge>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-medium">Key Length:</span>
+              <span>{debugInfo.privateKeyLength} characters</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-medium">Trading Mode:</span>
+              <span className="font-semibold">{debugInfo.paperTrading ? 'Paper Trading' : 'Live Trading'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-medium">Environment:</span>
+              <span>{debugInfo.environmentType}</span>
+            </div>
+            <div className="pt-2 mt-2 border-t border-red-300">
+              <p className="text-xs">
+                🚨 IF YOU SEE THIS RED CARD, THE CODE UPDATE WORKED! The original yellow card should appear below.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Original System Diagnostics */}
         <Card className="mb-6 bg-yellow-50 border-yellow-200">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-yellow-800">
@@ -308,21 +370,21 @@ export default function BotPage() {
           <CardContent className="text-yellow-900 space-y-2">
             <div className="flex justify-between">
               <span className="font-medium">VITE_WALLET_PRIVATE_KEY Status:</span>
-              <Badge className={isKeyDetected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                {isKeyDetected ? '✅ Detected' : '❌ Not Detected'}
+              <Badge className={debugInfo.hasPrivateKey ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                {debugInfo.hasPrivateKey ? '✅ Detected' : '❌ Not Detected'}
               </Badge>
             </div>
             <div className="flex justify-between">
               <span className="font-medium">Detected Key Length:</span>
-              <span>{privateKey ? privateKey.length : 0} characters</span>
+              <span>{debugInfo.privateKeyLength} characters</span>
             </div>
             <div className="flex justify-between">
               <span className="font-medium">Bot Engine Mode:</span>
-              <span className="font-semibold">{botEngine.paperTrading ? 'Paper Trading' : 'Live Trading'}</span>
+              <span className="font-semibold">{debugInfo.paperTrading ? 'Paper Trading' : 'Live Trading'}</span>
             </div>
             <div className="pt-2 mt-2 border-t border-yellow-300">
               <p className="text-xs">
-                This panel is for debugging. If 'Not Detected', the environment variable is not set correctly in Vercel. It must be present during the build process.
+                This panel is for debugging. If 'Not Detected', the environment variable is not set correctly in Vercel.
               </p>
             </div>
           </CardContent>
