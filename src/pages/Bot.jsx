@@ -57,7 +57,7 @@ class LiveTradingEngine {
     // Polygon Contract Addresses
     this.quickSwapRouter = '0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff';
     this.tokens = {
-      USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // Updated to USDC.e - the one you actually have
+      USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // FIXED: Use USDC.e - the one you actually have
       USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // 6 decimals
       WMATIC: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270' // 18 decimals
     };
@@ -218,7 +218,7 @@ class LiveTradingEngine {
 
       // --- 2. Prepare and Execute Swap ---
       const path = [this.tokens.USDC, this.tokens.USDT];
-      const slippage = this.config?.max_slippage_percentage || 2.0; // Increased from 0.5% to 2.0%
+      const slippage = this.config?.max_slippage_percentage || 2.0; // FIXED: Increased from 0.5% to 2.0%
       // Calculate minimum amount out considering slippage
       const minAmountOutRaw = tradeAmount * opportunity.sellPrice * (1 - slippage / 100);
       const amountOutMin = ethers.parseUnits(minAmountOutRaw.toFixed(6), 6); // USDT also has 6 decimals
@@ -227,12 +227,22 @@ class LiveTradingEngine {
 
       console.log(`Executing swap: ${ethers.formatUnits(amountIn, 6)} USDC for min ${ethers.formatUnits(amountOutMin, 6)} USDT`);
 
+      // NEW: Add Priority Gas Fee to get mined faster
+      const feeData = await this.provider.getFeeData();
+      const overrides = {
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas * BigInt(2), // Double the suggested priority fee to be competitive
+      };
+      
+      console.log(`⛽️ Using priority gas: maxFee=${ethers.formatUnits(overrides.maxFeePerGas, "gwei")} gwei, priorityFee=${ethers.formatUnits(overrides.maxPriorityFeePerGas, "gwei")} gwei`);
+
       const swapTx = await routerContract.swapExactTokensForTokens(
         amountIn,
         amountOutMin,
         path,
         this.wallet.address,
-        deadline
+        deadline,
+        overrides // FIXED: Pass the priority gas fee here
       );
 
       console.log(`📤 Swap transaction sent! Hash: ${swapTx.hash}. Waiting for confirmation...`);
