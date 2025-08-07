@@ -112,13 +112,53 @@ class LiveTradingEngine {
       const maticWei = await this.provider.getBalance(this.wallet.address);
       const maticBalance = parseFloat(ethers.formatEther(maticWei));
 
-      // Get USDC balance
-      const usdcContract = new ethers.Contract(this.tokens.USDC, erc20Abi, this.provider);
-      const usdcWei = await usdcContract.balanceOf(this.wallet.address);
-      const usdcBalance = parseFloat(ethers.formatUnits(usdcWei, 6)); // USDC has 6 decimals
+      // Get USDC balance - TRY BOTH USDC CONTRACTS
+      let usdcBalance = 0;
+      
+      // Try original USDC first (6 decimals)
+      try {
+        const usdcContract = new ethers.Contract(this.tokens.USDC, erc20Abi, this.provider);
+        const usdcWei = await usdcContract.balanceOf(this.wallet.address);
+        usdcBalance = parseFloat(ethers.formatUnits(usdcWei, 6)); // USDC has 6 decimals
+        console.log(`🔍 Original USDC (6 decimals): ${usdcBalance}`);
+      } catch (error) {
+        console.log('❌ Original USDC (6 decimals) failed:', error.message);
+      }
+      
+      // If no balance or balance is zero, try USDC.e (bridged USDC)
+      if (usdcBalance === 0) {
+        try {
+          const usdceContract = new ethers.Contract('0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', erc20Abi, this.provider);
+          const usdceWei = await usdceContract.balanceOf(this.wallet.address);
+          const usdceBalance6 = parseFloat(ethers.formatUnits(usdceWei, 6));
+          const usdceBalance18 = parseFloat(ethers.formatUnits(usdceWei, 18)); // Some bridged tokens might be 18 decimals
+          console.log(`🔍 USDC.e (6 decimals): ${usdceBalance6}`);
+          console.log(`🔍 USDC.e (18 decimals): ${usdceBalance18}`);
+          
+          // Use the non-zero value, prioritizing 6 decimals if available
+          usdcBalance = usdceBalance6 > 0 ? usdceBalance6 : usdceBalance18;
+          if (usdcBalance > 0) {
+              console.log('✅ Found USDC.e balance.');
+          }
+        } catch (error) {
+          console.log('❌ USDC.e failed:', error.message);
+        }
+      }
+      
+      // If still no balance, try original USDC with 18 decimals (as a last resort)
+      if (usdcBalance === 0) {
+        try {
+          const usdcContract = new ethers.Contract(this.tokens.USDC, erc20Abi, this.provider);
+          const usdcWei = await usdcContract.balanceOf(this.wallet.address);
+          usdcBalance = parseFloat(ethers.formatUnits(usdcWei, 18)); // Try 18 decimals
+          console.log(`🔍 Original USDC (18 decimals): ${usdcBalance}`);
+        } catch (error) {
+          console.log('❌ Original USDC (18 decimals) failed:', error.message);
+        }
+      }
 
       this.realBalances = { maticBalance, usdcBalance };
-      console.log(`💎 Balances updated: ${maticBalance.toFixed(4)} MATIC, ${usdcBalance.toFixed(2)} USDC`);
+      console.log(`💎 Final balances: ${maticBalance.toFixed(4)} MATIC, ${usdcBalance.toFixed(2)} USDC`);
       return this.realBalances;
     } catch (error) {
       console.error('❌ Balance fetch failed:', error);
