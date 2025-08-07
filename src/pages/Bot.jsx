@@ -533,7 +533,7 @@ export default function BotPage() {
     setIsRunning(true);
 
     runTradingLoop();
-    intervalRef.current = setInterval(runTradingLoop, 20000); // Every 20 seconds
+    intervalRef.current = setInterval(runTradingLoop, 60000); // Changed from 20 seconds to 60 seconds
 
     const startExecution = {
       id: Date.now(),
