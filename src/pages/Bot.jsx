@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,32 +33,9 @@ class DexArbitrageEngine {
       gasUsed: 0
     };
     
-    // Debug: Log environment check
-    console.log('🔍 Environment check:', typeof window !== 'undefined' ? 'browser' : 'server');
-    
-    // Safe environment variable access
-    let privateKey;
-    try {
-      // Check multiple ways to access the environment variable
-      if (typeof process !== 'undefined' && process.env) {
-        privateKey = process.env.VITE_WALLET_PRIVATE_KEY;
-        console.log('📝 Found process.env:', !!privateKey);
-      }
-      
-      if (!privateKey && typeof import !== 'undefined' && import.meta && import.meta.env) {
-        privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
-        console.log('📝 Found import.meta.env:', !!privateKey);
-      }
-      
-      // Final fallback - check window object for Vite injected variables
-      if (!privateKey && typeof window !== 'undefined' && window.__VITE_ENV__) {
-        privateKey = window.__VITE_ENV__.VITE_WALLET_PRIVATE_KEY;
-        console.log('📝 Found window.__VITE_ENV__:', !!privateKey);
-      }
-      
-    } catch (error) {
-      console.log('⚠️ Environment variable access error:', error.message);
-    }
+    // The only correct way to access env variables in a Vite project.
+    // Vite replaces this string with the actual value at build time.
+    const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
     
     this.privateKey = privateKey;
     this.paperTrading = !privateKey;
@@ -261,15 +239,10 @@ export default function BotPage() {
     return <div className="p-6">Loading Bot Controller...</div>;
   }
 
-  // Debug info - this will help us see what's happening
-  const debugInfo = {
-    hasPrivateKey: !!botEngine.privateKey,
-    privateKeyLength: botEngine.privateKey ? botEngine.privateKey.length : 0,
-    paperTrading: botEngine.paperTrading,
-    environmentType: typeof window !== 'undefined' ? 'browser' : 'server'
-  };
-
-  console.log('🐛 Debug Info:', debugInfo);
+  // --- Simplified UI Status Variables ---
+  const isKeyDetected = !!botEngine.privateKey;
+  const keyLength = botEngine.privateKey ? botEngine.privateKey.length : 0;
+  const currentTradingMode = botEngine.paperTrading ? 'Paper Trading' : 'Live Trading';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
@@ -324,42 +297,7 @@ export default function BotPage() {
           </div>
         </div>
 
-        {/* DEBUG CARD - This should definitely show up */}
-        <Card className="mb-6 bg-red-50 border-red-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-800">
-              <AlertTriangle className="w-5 h-5" />
-              🐛 DEBUG INFORMATION (You Should See This Card!)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-red-900 space-y-2">
-            <div className="flex justify-between">
-              <span className="font-medium">Private Key Detected:</span>
-              <Badge className={debugInfo.hasPrivateKey ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                {debugInfo.hasPrivateKey ? '✅ YES' : '❌ NO'}
-              </Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-medium">Key Length:</span>
-              <span>{debugInfo.privateKeyLength} characters</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-medium">Trading Mode:</span>
-              <span className="font-semibold">{debugInfo.paperTrading ? 'Paper Trading' : 'Live Trading'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-medium">Environment:</span>
-              <span>{debugInfo.environmentType}</span>
-            </div>
-            <div className="pt-2 mt-2 border-t border-red-300">
-              <p className="text-xs">
-                🚨 IF YOU SEE THIS RED CARD, THE CODE UPDATE WORKED! The original yellow card should appear below.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Original System Diagnostics */}
+        {/* System Diagnostics Card */}
         <Card className="mb-6 bg-yellow-50 border-yellow-200">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-yellow-800">
@@ -370,17 +308,17 @@ export default function BotPage() {
           <CardContent className="text-yellow-900 space-y-2">
             <div className="flex justify-between">
               <span className="font-medium">VITE_WALLET_PRIVATE_KEY Status:</span>
-              <Badge className={debugInfo.hasPrivateKey ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                {debugInfo.hasPrivateKey ? '✅ Detected' : '❌ Not Detected'}
+              <Badge className={isKeyDetected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                {isKeyDetected ? '✅ Detected' : '❌ Not Detected'}
               </Badge>
             </div>
             <div className="flex justify-between">
               <span className="font-medium">Detected Key Length:</span>
-              <span>{debugInfo.privateKeyLength} characters</span>
+              <span>{keyLength} characters</span>
             </div>
             <div className="flex justify-between">
               <span className="font-medium">Bot Engine Mode:</span>
-              <span className="font-semibold">{debugInfo.paperTrading ? 'Paper Trading' : 'Live Trading'}</span>
+              <span className="font-semibold">{currentTradingMode}</span>
             </div>
             <div className="pt-2 mt-2 border-t border-yellow-300">
               <p className="text-xs">
