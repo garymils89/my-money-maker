@@ -20,6 +20,7 @@ import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
+import LiveActivityFeed from "../components/bot/LiveActivityFeed";
 
 import { BotExecution } from "@/api/entities";
 import { ArbitrageOpportunity } from "@/api/entities";
@@ -115,7 +116,7 @@ export default function BotPage() {
       
       const matic = parseFloat(ethers.formatEther(maticWei));
       const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
-      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
+      const bridgedUsdc = parseFloat(ethers.formatUnits(briddcUsdcWei, Number(bridgedDecimals)));
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
@@ -174,24 +175,20 @@ export default function BotPage() {
   }, []);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
-    console.log(`⚡ BOT: FLASHLOAN - Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
+    console.log(`⚡ FLASHLOAN TRADE: Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
     
     const grossProfit = config.amount * (opportunity.profit_percentage / 100);
     const loanFee = config.amount * (config.fee_percentage / 100);
     const netProfit = grossProfit - loanFee;
 
     setLastFlashloanSim({ grossProfit, loanFee, netProfit });
-
-    if (netProfit <= 0) {
-      console.log(`❌ BOT: FLASHLOAN - Net profit too low: $${netProfit.toFixed(2)}`);
-      return;
-    }
     
     tradedOpportunityIdsRef.current.add(opportunity.id);
-    await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    const status = Math.random() > 0.1 ? 'completed' : 'failed';
-    const profitRealized = status === 'completed' ? netProfit * (0.9 + Math.random() * 0.1) : -loanFee;
+    // Simulate success/failure (90% success rate for flashloans)
+    const success = Math.random() > 0.1;
+    const status = success ? 'completed' : 'failed';
+    const profitRealized = status === 'completed' ? netProfit * (0.95 + Math.random() * 0.05) : -loanFee;
 
     await recordExecution({
       execution_type: 'flashloan_trade',
@@ -208,7 +205,7 @@ export default function BotPage() {
         loanAmount: config.amount, 
         loanFee: loanFee, 
         provider: config.provider,
-        tx_hash: '0xFLASH_' + ethers.hexlify(ethers.randomBytes(26)).substring(2)
+        tx_hash: '0xFLASH_' + Math.random().toString(36).substring(2, 15)
       }
     });
 
@@ -219,7 +216,7 @@ export default function BotPage() {
       loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
     }));
 
-    console.log(`💰 BOT: FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
+    console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
   }, [recordExecution]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
@@ -265,66 +262,44 @@ export default function BotPage() {
 
   const runTradingLoop = useCallback(async () => {
     try {
-      console.log("🔄 === BOT: TRADING LOOP START ===");
+      console.log("🔄 === FLASHLOAN BOT: TRADING LOOP START ===");
       const { totalUsdc } = await fetchRealBalances();
       const opps = await scanForOpportunities();
       
-      recordExecution({ 
-        execution_type: 'scan', 
-        status: 'completed', 
-        details: { 
-          found: opps.length, 
-          total_traded_this_session: tradedOpportunityIdsRef.current.size,
-          flashloan_enabled: flashloanConfig?.enabled || false
-        }
-      });
-      
       if (opps.length > 0) {
         const topOpp = opps[0];
-        console.log(`🎯 BOT: Top opportunity found: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`);
+        console.log(`🎯 FLASHLOAN BOT: Found opportunity: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`);
         
+        // ALWAYS try flashloan first - it's more profitable
         if (flashloanConfig?.enabled) {
-          console.log("⚡ BOT: Checking flashloan viability...");
-          const potentialGrossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
-          const potentialLoanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
-          const potentialNetProfit = potentialGrossProfit - potentialLoanFee;
+          const grossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
+          const loanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
+          const netProfit = grossProfit - loanFee;
           
-          if (potentialNetProfit > 5) { // Profitability threshold for flashloan
-            console.log(`✅ BOT: Flashloan is profitable ($${potentialNetProfit.toFixed(2)}), executing...`);
+          console.log(`⚡ FLASHLOAN ANALYSIS: Gross: $${grossProfit.toFixed(2)}, Fee: $${loanFee.toFixed(2)}, Net: $${netProfit.toFixed(2)}`);
+          
+          if (netProfit > 1) { // Lower threshold - any profit is good
+            console.log(`✅ FLASHLOAN EXECUTING: Net profit $${netProfit.toFixed(2)} is acceptable`);
             await executeFlashloanArbitrage(topOpp, flashloanConfig);
-            return; 
           } else {
-            console.log(`❌ BOT: Flashloan not profitable enough ($${potentialNetProfit.toFixed(2)}). Checking regular trade.`);
+            console.log(`❌ FLASHLOAN SKIPPED: Net profit $${netProfit.toFixed(2)} too low`);
           }
-        }
-        
-        if (totalUsdc >= (botConfig?.max_position_size || 300)) {
-           console.log("📈 BOT: Executing regular arbitrage trade.");
-          await executeArbitrage(topOpp);
         } else {
-          console.log(`⚠️ BOT: Insufficient balance for regular trade: ${totalUsdc.toFixed(2)} < ${botConfig.max_position_size}`);
-          recordExecution({
-            execution_type: 'alert',
-            status: 'completed',
-            details: {
-                alert_type: "Trade Skipped",
-                message: `Insufficient balance: ${totalUsdc.toFixed(2)} < ${botConfig.max_position_size}`
-            }
-          });
+          console.log("❌ FLASHLOAN DISABLED in config");
         }
       } else {
-        console.log(".. BOT: No profitable opportunities found this cycle.");
+        console.log("⚠️ FLASHLOAN BOT: No opportunities found this cycle");
       }
-      console.log("✅ === BOT: TRADING LOOP END ===");
     } catch (error) {
-      console.error("❌ BOT: Trading loop error:", error);
+      console.error("❌ FLASHLOAN BOT ERROR:", error);
+      // Keep error recording here for general errors in the loop
       recordExecution({
         execution_type: 'error',
         status: 'failed',
         error_message: error.message
       });
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig, recordExecution]);
+  }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, flashloanConfig, recordExecution]); // Added recordExecution back for error logging
 
   // Check localStorage on initial load to see if bot should be running
   useEffect(() => {
@@ -472,19 +447,25 @@ export default function BotPage() {
           </Card>
         </div>
 
-        <Tabs defaultValue="dashboard" className="space-y-6">
+        <Tabs defaultValue="activity" className="space-y-6">
           <div className="bg-white/80 backdrop-blur-sm rounded-lg p-1">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="dashboard" className="flex items-center gap-2"><Activity className="w-4 h-4" />Dashboard</TabsTrigger>
-              <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Configuration</TabsTrigger>
-              <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk Controls</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="activity" className="flex items-center gap-2"><Activity className="w-4 h-4" />Live Activity</TabsTrigger>
+              <TabsTrigger value="dashboard" className="flex items-center gap-2"><Activity className="w-4 h-4" />History</TabsTrigger>
+              <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Config</TabsTrigger>
+              <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk</TabsTrigger>
               <TabsTrigger value="leverage" className="flex items-center gap-2"><Zap className="w-4 h-4" />Flashloans</TabsTrigger>
             </TabsList>
           </div>
 
+          <TabsContent value="activity">
+            <LiveActivityFeed executions={executions} isRunning={isRunning} />
+          </TabsContent>
+          
           <TabsContent value="dashboard">
             <BotExecutionLog executions={executions} />
           </TabsContent>
+          
           <TabsContent value="config">
             <BotConfigForm config={botConfig} onSubmit={setBotConfig} />
           </TabsContent>
