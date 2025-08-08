@@ -81,15 +81,18 @@ export default function BotPage() {
     return unsubscribe;
   }, []);
 
-  // Add function to calculate daily stats from database
+  // Add function to calculate daily stats from database - FIXED API CALL
   const calculateDailyStatsFromDB = useCallback(async () => {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      const todayExecutions = await BotExecution.filter({
-        created_date: { $gte: today.toISOString() }
-      }, '-created_date', 1000);
+      // Use BotExecution.list() and filter in JavaScript
+      const allExecutions = await BotExecution.list('-created_date', 1000);
+      
+      const todayExecutions = allExecutions.filter(e => 
+        new Date(e.created_date) >= today
+      );
       
       const todayTrades = todayExecutions.filter(e => 
         e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'
@@ -102,12 +105,17 @@ export default function BotPage() {
       const loss = failedTrades.reduce((sum, trade) => sum + Math.abs(trade.profit_realized || 0), 0);
       const gasUsed = todayTrades.reduce((sum, trade) => sum + (trade.gas_used || 0), 0);
       
-      setDailyStats({
+      const newStats = {
         trades: todayTrades.length,
         profit,
         loss,
         gasUsed
-      });
+      };
+      
+      setDailyStats(newStats);
+      
+      // Store in botStateManager for persistence across navigation
+      botStateManager.setDailyStats(newStats);
       
       console.log(`📊 Daily stats updated: ${todayTrades.length} trades, $${profit.toFixed(2)} profit`);
     } catch (error) {
@@ -183,7 +191,13 @@ export default function BotPage() {
       }
     }
     
-    // Always calculate daily stats from database
+    // Load daily stats from botStateManager first (for instant display)
+    const existingStats = botStateManager.getDailyStats();
+    if (existingStats) {
+      setDailyStats(existingStats);
+    }
+    
+    // Then refresh from database (to get latest data)
     await calculateDailyStatsFromDB();
   }, [calculateDailyStatsFromDB]);
 

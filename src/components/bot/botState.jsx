@@ -1,8 +1,7 @@
-// This is a simple, in-memory state manager for the bot's execution logs.
-// Because it's a module, it acts as a singleton, and its state persists
-// for the entire user session, surviving page navigation.
+// Enhanced state manager with daily stats persistence
 
 let executions = [];
+let dailyStats = null;
 let listeners = [];
 
 const notifyListeners = () => {
@@ -31,6 +30,14 @@ export const botStateManager = {
 
   getExecutions: () => {
     return executions;
+  },
+
+  setDailyStats: (stats) => {
+    dailyStats = stats;
+  },
+
+  getDailyStats: () => {
+    return dailyStats;
   },
 
   subscribe: (listener) => {
