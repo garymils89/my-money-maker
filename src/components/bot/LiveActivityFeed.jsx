@@ -8,11 +8,12 @@ import {
   Zap,
   TrendingUp,
   Search,
-  AlertTriangle,
   DollarSign,
   Clock,
   CheckCircle,
-  XCircle
+  XCircle,
+  Info,
+  Lightbulb
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BotExecution } from "@/api/entities";
@@ -23,8 +24,7 @@ export default function LiveActivityFeed({ isRunning }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch the last 15 records to keep the feed focused
-        const data = await BotExecution.list('-created_date', 15);
+        const data = await BotExecution.list('-created_date', 25); // Fetch more records for detailed logs
         setExecutions(data);
       } catch (error) {
         console.error("LiveActivityFeed: Error fetching data", error);
@@ -32,33 +32,37 @@ export default function LiveActivityFeed({ isRunning }) {
     };
 
     fetchData(); // Fetch immediately on load
-    const interval = setInterval(fetchData, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchData, 4000); // Refresh faster
 
     return () => clearInterval(interval); // Cleanup on unmount
   }, []);
 
-  const getExecutionIcon = (type, status) => {
-    if (type === 'flashloan_trade') {
-      return status === 'completed' ?
-        <Zap className="w-4 h-4 text-purple-500" /> :
-        <XCircle className="w-4 h-4 text-red-500" />;
+  const getExecutionIcon = (execution) => {
+    const { execution_type, status, details } = execution;
+    if (execution_type === 'flashloan_trade') {
+      return status === 'completed' ? <Zap className="w-4 h-4 text-purple-500" /> : <XCircle className="w-4 h-4 text-red-500" />;
     }
-    if (type === 'trade') {
-      return status === 'completed' ?
-        <TrendingUp className="w-4 h-4 text-emerald-500" /> :
-        <XCircle className="w-4 h-4 text-red-500" />;
+    if (execution_type === 'trade') {
+      return status === 'completed' ? <TrendingUp className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-red-500" />;
     }
-    if (type === 'scan') return <Search className="w-4 h-4 text-blue-500" />;
-    if (type === 'alert') return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+    if (execution_type === 'alert') {
+        switch (details?.alert_type) {
+            case 'Opportunity Found': return <Lightbulb className="w-4 h-4 text-yellow-500" />;
+            case 'Flashloan Analysis': return <Info className="w-4 h-4 text-blue-500" />;
+            case 'Decision': return <CheckCircle className="w-4 h-4 text-green-500" />;
+            case 'Scan Result': return <Search className="w-4 h-4 text-slate-500" />;
+            default: return <Info className="w-4 h-4 text-slate-500" />;
+        }
+    }
+    if (execution_type === 'error') return <XCircle className="w-4 h-4 text-red-500" />;
     return <Activity className="w-4 h-4 text-slate-500" />;
   };
 
-  const getStatusColor = (type, status) => {
-    if (status === 'completed' && (type === 'trade' || type === 'flashloan_trade')) {
-      return 'bg-emerald-100 text-emerald-800';
-    }
+  const getStatusColor = (execution) => {
+    const { execution_type, status } = execution;
+    if (status === 'completed' && (execution_type === 'trade' || execution_type === 'flashloan_trade')) return 'bg-emerald-100 text-emerald-800';
     if (status === 'failed') return 'bg-red-100 text-red-800';
-    if (type === 'scan') return 'bg-blue-100 text-blue-800';
+    if (execution_type === 'alert') return 'bg-blue-50 text-blue-800';
     return 'bg-slate-100 text-slate-800';
   };
 
@@ -70,9 +74,6 @@ export default function LiveActivityFeed({ isRunning }) {
       second: '2-digit'
     });
   };
-
-  // No longer need to slice, we fetch the exact number needed
-  const recentExecutions = executions;
 
   return (
     <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
@@ -91,91 +92,66 @@ export default function LiveActivityFeed({ isRunning }) {
       <CardContent>
         <ScrollArea className="h-[450px]">
           <AnimatePresence>
-            {recentExecutions.length > 0 ? (
+            {executions.length > 0 ? (
               <div className="space-y-3">
-                {recentExecutions.map((execution, index) => (
+                {executions.map((execution) => (
                   <motion.div
                     key={execution.id}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
+                    transition={{ duration: 0.2 }}
                     className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100"
                   >
                     <div className="flex-shrink-0 mt-0.5">
-                      {getExecutionIcon(execution.execution_type, execution.status)}
+                      {getExecutionIcon(execution)}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-slate-900 capitalize text-sm">
-                          {execution.execution_type.replace('_', ' ')}
+                          {execution.execution_type === 'alert' ? execution.details.alert_type : execution.execution_type.replace('_', ' ')}
                         </span>
-                        <Badge className={getStatusColor(execution.execution_type, execution.status)}>
+                        <Badge className={getStatusColor(execution)}>
                           {execution.status}
                         </Badge>
-                        <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <span className="text-xs text-slate-500 flex items-center gap-1 ml-auto">
                           <Clock className="w-3 h-3" />
                           {formatTime(execution.created_date)}
                         </span>
                       </div>
 
-                      {/* Flashloan Trade Details */}
-                      {execution.execution_type === 'flashloan_trade' && execution.details && (
-                        <div className="text-sm space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-600">
-                              {execution.details.opportunity?.pair} • ${execution.details.loanAmount?.toLocaleString()} loan
-                            </span>
-                            <span className={`font-bold flex items-center gap-1 ${
-                              (execution.profit_realized || 0) > 0 ? 'text-emerald-600' : 'text-red-600'
-                            }`}>
-                              <DollarSign className="w-3 h-3" />
-                              {(execution.profit_realized || 0) > 0 ? '+' : ''}
-                              {(execution.profit_realized || 0).toFixed(2)}
-                            </span>
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            {execution.details.opportunity?.buyDex} → {execution.details.opportunity?.sellDex} •
-                            Fee: ${execution.details.loanFee?.toFixed(2)}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Regular Trade Details */}
-                      {execution.execution_type === 'trade' && execution.details && (
-                        <div className="text-sm">
+                      {/* Trade Details (Flashloan and Regular) */}
+                      {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && (
+                         <div className="text-sm">
                           <div className="flex items-center justify-between">
                             <span className="text-slate-600">
                               {execution.details.opportunity?.pair}
+                              {execution.execution_type === 'flashloan_trade' && execution.details.loanAmount &&
+                                ` • $${execution.details.loanAmount?.toLocaleString()} loan`
+                              }
                             </span>
-                            <span className={`font-bold flex items-center gap-1 ${
-                              (execution.profit_realized || 0) > 0 ? 'text-emerald-600' : 'text-red-600'
-                            }`}>
+                            <span className={`font-bold flex items-center gap-1 ${ (execution.profit_realized || 0) > 0 ? 'text-emerald-600' : 'text-red-600' }`}>
                               <DollarSign className="w-3 h-3" />
                               {(execution.profit_realized || 0) > 0 ? '+' : ''}
                               {(execution.profit_realized || 0).toFixed(2)}
                             </span>
                           </div>
-                        </div>
-                      )}
-
-                      {/* Scan Details */}
-                      {execution.execution_type === 'scan' && execution.details && (
-                        <div className="text-sm text-slate-600">
-                          Found {execution.details.found || 0} opportunities
-                          {execution.details.flashloan_enabled && (
-                            <span className="ml-2 text-purple-600">• Flashloan enabled</span>
+                          {execution.execution_type === 'flashloan_trade' && execution.details && (
+                            <div className="text-xs text-slate-500">
+                              {execution.details.opportunity?.buyDex} → {execution.details.opportunity?.sellDex} •
+                              Fee: ${execution.details.loanFee?.toFixed(2)}
+                            </div>
                           )}
                         </div>
                       )}
-
+                      
                       {/* Alert Details */}
-                      {execution.execution_type === 'alert' && execution.details && (
-                        <div className="text-sm text-amber-700">
+                      {execution.execution_type === 'alert' && (
+                        <div className="text-sm text-slate-600">
                           {execution.details.message}
                         </div>
                       )}
-
+                      
                       {/* Error Details */}
                       {execution.execution_type === 'error' && (
                         <div className="text-sm text-red-600">

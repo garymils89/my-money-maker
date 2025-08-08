@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsTrigger, TabsList } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Bot,
@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Settings,
   Shield,
+  History, // Added History icon for the dashboard tab
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
@@ -119,6 +120,7 @@ export default function BotPage() {
       
       const matic = parseFloat(ethers.formatEther(maticWei));
       const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
+      // Fix typo: briddcUsdcWei should be bridgedUsdcWei
       const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
 
       setMaticBalance(matic);
@@ -204,7 +206,7 @@ export default function BotPage() {
     }));
 
     console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
-  }, [recordExecution, setDailyStats]); // Added setDailyStats
+  }, [recordExecution, setDailyStats]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
     console.log(`📈 BOT: REGULAR - Executing ${opportunity.pair}`);
@@ -245,17 +247,17 @@ export default function BotPage() {
     }));
 
     console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}`);
-  }, [recordExecution, setDailyStats]); // Added setDailyStats
+  }, [recordExecution, setDailyStats]);
 
   const runTradingLoop = useCallback(async () => {
     try {
-      console.log("🔄 === FLASHLOAN BOT: TRADING LOOP START ===");
+      await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Cycle', message: 'Starting trading loop.' } });
       const { totalUsdc } = await fetchRealBalances();
       const opps = await scanForOpportunities();
       
       if (opps.length > 0) {
         const topOpp = opps[0];
-        console.log(`🎯 FLASHLOAN BOT: Found opportunity: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`);
+        await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Opportunity Found', message: `Found ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%` } });
         
         // ALWAYS try flashloan first - it's more profitable
         if (flashloanConfig?.enabled) {
@@ -263,19 +265,19 @@ export default function BotPage() {
           const loanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
           const netProfit = grossProfit - loanFee;
           
-          console.log(`⚡ FLASHLOAN ANALYSIS: Gross: $${grossProfit.toFixed(2)}, Fee: $${loanFee.toFixed(2)}, Net: $${netProfit.toFixed(2)}`);
+          await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Flashloan Analysis', message: `Gross: $${grossProfit.toFixed(2)}, Fee: $${loanFee.toFixed(2)}, Net: $${netProfit.toFixed(2)}` } });
           
           if (netProfit > 1) { // Lower threshold - any profit is good
-            console.log(`✅ FLASHLOAN EXECUTING: Net profit $${netProfit.toFixed(2)} is acceptable`);
+            await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Decision', message: `Executing flashloan, net profit $${netProfit.toFixed(2)} is acceptable.` } });
             await executeFlashloanArbitrage(topOpp, flashloanConfig);
           } else {
-            console.log(`❌ FLASHLOAN SKIPPED: Net profit $${netProfit.toFixed(2)} too low`);
+            await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Decision', message: `Skipping flashloan, net profit $${netProfit.toFixed(2)} is too low.` } });
           }
         } else {
-          console.log("❌ FLASHLOAN DISABLED in config");
+          await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Info', message: `Flashloans are disabled in config.` } });
         }
       } else {
-        console.log("⚠️ FLASHLOAN BOT: No opportunities found this cycle");
+        await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Scan Result', message: 'No profitable opportunities found this cycle.' } });
       }
     } catch (error) {
       console.error("❌ FLASHLOAN BOT ERROR:", error);
@@ -286,7 +288,7 @@ export default function BotPage() {
         error_message: error.message
       });
     }
-  }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, executeArbitrage, recordExecution, flashloanConfig, botConfig]); // Added executeArbitrage and botConfig
+  }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, executeArbitrage, recordExecution, flashloanConfig, botConfig]);
 
   // This effect now correctly handles the bot's lifecycle
   useEffect(() => {
@@ -294,7 +296,7 @@ export default function BotPage() {
     if (savedBotState === 'true' && !isRunning) {
       handleToggleBot(true); 
     }
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
   const handleToggleBot = async (startSilently = false) => {
     if (isRunning) {
@@ -308,10 +310,11 @@ export default function BotPage() {
         clearInterval(globalBotInterval);
         globalBotInterval = null;
       }
+      await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Stopped.' } });
     } else {
       // --- START BOT ---
       if (!startSilently) {
-        alert("Bot is starting! Check the F12 console to see live activity.");
+        await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Starting...' } });
       }
       console.log("🚀 BOT: Starting...");
       tradedOpportunityIdsRef.current = new Set();
@@ -326,9 +329,10 @@ export default function BotPage() {
         if (globalBotInterval) clearInterval(globalBotInterval);
         runTradingLoop(); // Run immediately on start
         globalBotInterval = setInterval(runTradingLoop, 15000); // Set interval for subsequent runs
-        
+        await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Started Successfully.' } });
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
+        await recordExecution({ execution_type: 'alert', status: 'failed', details: { alert_type: 'Status', message: 'Bot failed to start. Check console for errors.' } });
       }
     }
   };
@@ -364,7 +368,7 @@ export default function BotPage() {
           </div>
 
           <Button
-            onClick={() => handleToggleBot()} // Call without arguments for manual toggle
+            onClick={() => handleToggleBot()}
             className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
           >
             {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
@@ -436,7 +440,8 @@ export default function BotPage() {
           <div className="bg-white/80 backdrop-blur-sm rounded-lg p-1">
             <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="activity" className="flex items-center gap-2"><Activity className="w-4 h-4" />Live Activity</TabsTrigger>
-              <TabsTrigger value="dashboard" className="flex items-center gap-2"><Activity className="w-4 h-4" />History</TabsTrigger>
+              {/* Changed icon for dashboard tab from Activity to History */}
+              <TabsTrigger value="dashboard" className="flex items-center gap-2"><History className="w-4 h-4" />History</TabsTrigger>
               <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Config</TabsTrigger>
               <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk</TabsTrigger>
               <TabsTrigger value="leverage" className="flex items-center gap-2"><Zap className="w-4 h-4" />Flashloans</TabsTrigger>
