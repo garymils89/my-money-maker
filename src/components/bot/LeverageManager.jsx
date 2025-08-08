@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,9 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Zap, Rocket, Info, TrendingUp, TrendingDown } from "lucide-react";
+import { tradingSafety } from "./TradingSafetyLayer"; // Add this import
 
 export default function LeverageManager({ onConfigChange, simulationResult }) {
-  const [loanAmount, setLoanAmount] = useState(25000);
+  // Use the safety layer's max flashloan amount as the default
+  const maxAllowedFlashloan = tradingSafety.getConfig().maxFlashloanAmount;
+  const [loanAmount, setLoanAmount] = useState(Math.min(25000, maxAllowedFlashloan));
   const [provider, setProvider] = useState('aave');
 
   const handleConfigChange = () => {
@@ -37,7 +41,7 @@ export default function LeverageManager({ onConfigChange, simulationResult }) {
           <Alert className="border-blue-200 bg-blue-50">
             <Info className="w-4 h-4" />
             <AlertDescription className="text-blue-800">
-              Configure the parameters for your simulated Flashloan trades. The bot will use these settings when an opportunity is profitable enough to cover the loan fees.
+              Configure the parameters for your flashloan trades. Environment limit: ${maxAllowedFlashloan.toLocaleString()}
             </AlertDescription>
           </Alert>
 
@@ -59,14 +63,14 @@ export default function LeverageManager({ onConfigChange, simulationResult }) {
             <Slider
               id="loanAmount"
               min={5000}
-              max={100000}
+              max={maxAllowedFlashloan} // Use environment-specific max
               step={1000}
               value={[loanAmount]}
               onValueChange={(value) => setLoanAmount(value[0])}
             />
              <div className="flex justify-between text-xs text-slate-500">
               <span>$5,000</span>
-              <span>$100,000</span>
+              <span>${maxAllowedFlashloan.toLocaleString()}</span>
             </div>
           </div>
           
@@ -78,6 +82,10 @@ export default function LeverageManager({ onConfigChange, simulationResult }) {
               <div className="flex justify-between">
                   <span className="text-slate-600">Fee on ${loanAmount.toLocaleString()}:</span>
                   <span className="font-medium text-red-600">${(loanAmount * 0.0009).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                  <span className="text-slate-600">Environment Limit:</span>
+                  <span className="font-medium text-orange-600">${maxAllowedFlashloan.toLocaleString()}</span>
               </div>
           </div>
         </CardContent>

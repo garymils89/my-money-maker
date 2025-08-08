@@ -3,13 +3,27 @@ class TradingSafetyLayer {
   constructor() {
     this.environment = this.detectEnvironment();
     this.config = this.loadEnvironmentConfig();
+    
+    // Debug logging to see what's happening
+    console.log('🛡️ SAFETY LAYER INITIALIZED:', {
+      environment: this.environment,
+      hostname: window.location.hostname,
+      envVars: {
+        maxFlashloan: import.meta.env.VITE_MAX_FLASHLOAN_AMOUNT,
+        maxTrade: import.meta.env.VITE_MAX_TRADE_SIZE,
+        requireConfirm: import.meta.env.VITE_REQUIRE_CONFIRMATION
+      },
+      finalConfig: this.config
+    });
   }
 
   detectEnvironment() {
     const hostname = window.location.hostname;
     
+    console.log('🔍 Detecting environment from hostname:', hostname);
+    
     // Production: main deployment URL without git prefix
-    if (hostname.includes('arbitrage-x.vercel.app') && !hostname.includes('git-')) {
+    if (hostname.includes('my-money-maker.vercel.app') && !hostname.includes('git-')) {
       return 'production';
     }
     
@@ -28,12 +42,24 @@ class TradingSafetyLayer {
   }
 
   loadEnvironmentConfig() {
-    // Load limits from environment variables with sensible defaults
+    // First try to read from environment variables
+    const envMaxFlashloan = import.meta.env.VITE_MAX_FLASHLOAN_AMOUNT;
+    const envMaxTrade = import.meta.env.VITE_MAX_TRADE_SIZE;
+    const envRequireConfirm = import.meta.env.VITE_REQUIRE_CONFIRMATION;
+    
+    console.log('📋 Raw environment variables:', {
+      VITE_MAX_FLASHLOAN_AMOUNT: envMaxFlashloan,
+      VITE_MAX_TRADE_SIZE: envMaxTrade,
+      VITE_REQUIRE_CONFIRMATION: envRequireConfirm
+    });
+
+    const defaults = this.getDefaultLimits();
+    
     return {
-      maxFlashloanAmount: parseFloat(import.meta.env.VITE_MAX_FLASHLOAN_AMOUNT) || this.getDefaultLimits().maxFlashloanAmount,
-      maxTradeSize: parseFloat(import.meta.env.VITE_MAX_TRADE_SIZE) || this.getDefaultLimits().maxTradeSize,
-      requiresConfirmation: import.meta.env.VITE_REQUIRE_CONFIRMATION === 'true' || this.getDefaultLimits().requiresConfirmation,
-      allowsExperimental: import.meta.env.VITE_ALLOW_EXPERIMENTAL !== 'false' || this.getDefaultLimits().allowsExperimental,
+      maxFlashloanAmount: envMaxFlashloan ? parseFloat(envMaxFlashloan) : defaults.maxFlashloanAmount,
+      maxTradeSize: envMaxTrade ? parseFloat(envMaxTrade) : defaults.maxTradeSize,
+      requiresConfirmation: envRequireConfirm ? envRequireConfirm === 'true' : defaults.requiresConfirmation,
+      allowsExperimental: import.meta.env.VITE_ALLOW_EXPERIMENTAL !== 'false',
       environment: this.environment
     };
   }
