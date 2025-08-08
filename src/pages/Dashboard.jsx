@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { BotExecution } from "@/api/entities";
 import { motion } from "framer-motion";
@@ -10,6 +11,7 @@ import StatsGrid from "../components/dashboard/StatsGrid";
 import LiveOpportunities from "../components/dashboard/LiveOpportunities";
 import MarketOverview from "../components/dashboard/MarketOverview";
 import { ethers } from "ethers";
+import { botStateManager } from "../components/bot/botState"; // Import bot state
 
 // Wallet details for balance fetching
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
@@ -19,14 +21,25 @@ const USDC_ABI = ["function balanceOf(address owner) view returns (uint256)", "f
 export default function Dashboard() {
   const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [lastUpdated, setLastUpdated] = new Date());
   const [walletBalance, setWalletBalance] = useState(0);
 
   useEffect(() => {
     loadData();
-    // Refresh every 10 seconds to show live updates
-    const interval = setInterval(loadData, 10000);
-    return () => clearInterval(interval);
+    
+    // Subscribe to bot state updates for real-time data
+    const unsubscribe = botStateManager.subscribe((botExecutions) => {
+      setExecutions(botExecutions);
+      setLastUpdated(new Date());
+    });
+    
+    // Refresh every 30 seconds (less frequent than bot page)
+    const interval = setInterval(loadData, 30000);
+    
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   const fetchWalletBalance = async () => {
@@ -62,15 +75,23 @@ export default function Dashboard() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [executionData, balance] = await Promise.all([
-        BotExecution.list('-created_date', 1000),
-        fetchWalletBalance()
-      ]);
+      // Get bot executions from central state first (instant)
+      const botExecutions = botStateManager.getExecutions();
+      
+      // If we have bot data, use it; otherwise load from database
+      const executionData = botExecutions.length > 0 
+        ? botExecutions 
+        : await BotExecution.list('-created_date', 1000);
+      
+      const balance = await fetchWalletBalance();
+      
       setExecutions(executionData || []);
       setWalletBalance(balance);
       setLastUpdated(new Date());
+      
+      console.log(`📊 Dashboard loaded: ${executionData?.length || 0} executions, $${balance.toFixed(2)} balance`);
     } catch (error) {
-      console.error("Error loading execution data:", error);
+      console.error("Error loading dashboard data:", error);
     } finally {
       setIsLoading(false);
     }

@@ -78,6 +78,14 @@ export default function BotPage() {
   // Subscribe to the central state on mount, unsubscribe on unmount
   useEffect(() => {
     const unsubscribe = botStateManager.subscribe(setExecutions);
+    
+    // Load existing daily stats immediately when component mounts
+    const existingStats = botStateManager.getDailyStats();
+    if (existingStats) {
+      setDailyStats(existingStats);
+      console.log(`📊 BOT: Loaded existing daily stats: ${existingStats.trades} trades`);
+    }
+    
     return unsubscribe;
   }, []);
 
@@ -112,14 +120,15 @@ export default function BotPage() {
         gasUsed
       };
       
+      // Update both local state AND central state
       setDailyStats(newStats);
-      
-      // Store in botStateManager for persistence across navigation
       botStateManager.setDailyStats(newStats);
       
       console.log(`📊 Daily stats updated: ${todayTrades.length} trades, $${profit.toFixed(2)} profit`);
+      return newStats;
     } catch (error) {
       console.error("Error calculating daily stats:", error);
+      return null;
     }
   }, []);
 
@@ -192,6 +201,7 @@ export default function BotPage() {
     }
     
     // Load daily stats from botStateManager first (for instant display)
+    // NOTE: Initial load is now handled by the main useEffect, this is a fallback if this function is called independently.
     const existingStats = botStateManager.getDailyStats();
     if (existingStats) {
       setDailyStats(existingStats);
