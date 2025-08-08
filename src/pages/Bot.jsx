@@ -22,8 +22,8 @@ import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
 
-import { BotExecution } from "@/entities/BotExecution";
-import { ArbitrageOpportunity } from "@/entities/ArbitrageOpportunity";
+import { BotExecution } from "@/api/entities";
+import { ArbitrageOpportunity } from "@/api/entities";
 import { ethers } from "ethers";
 
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
