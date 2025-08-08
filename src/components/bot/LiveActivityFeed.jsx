@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,18 +25,39 @@ export default function LiveActivityFeed({ isRunning }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const data = await BotExecution.list('-created_date', 25);
-        setExecutions(data);
-        console.log("LiveActivityFeed: Loaded", data.length, "executions from database");
+        // Try different query methods to debug the issue
+        console.log("LiveActivityFeed: Attempting to fetch BotExecution data...");
+        
+        // First try the basic list method with sorting and limit
+        let data = await BotExecution.list('-created_date', 50);
+        console.log("LiveActivityFeed: BotExecution.list returned:", data?.length || 0, "records");
+        
+        // If no data, try without sorting and limit
+        if (!data || data.length === 0) {
+          console.log("LiveActivityFeed: Trying unsorted query...");
+          data = await BotExecution.list();
+          console.log("LiveActivityFeed: Unsorted query returned:", data?.length || 0, "records");
+        }
+        
+        // If still no data, try filter method
+        if (!data || data.length === 0) {
+          console.log("LiveActivityFeed: Trying filter method...");
+          data = await BotExecution.filter({});
+          console.log("LiveActivityFeed: Filter method returned:", data?.length || 0, "records");
+        }
+        
+        setExecutions(data || []);
+        console.log("LiveActivityFeed: Final data set to state:", (data || []).length, "records");
       } catch (error) {
-        console.error("LiveActivityFeed: Error fetching data", error);
+        console.error("LiveActivityFeed: Error fetching data:", error);
+        setExecutions([]);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 5000); // Slower refresh to reduce noise
     return () => clearInterval(interval);
   }, []);
 

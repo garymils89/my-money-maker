@@ -44,7 +44,7 @@ export default function BotPage() {
   const [walletAddress, setWalletAddress] = useState(null);
   
   const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
-  const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0);
+  const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0); // Corrected state variable name
   const [maticBalance, setMaticBalance] = useState(0);
   
   const [botConfig, setBotConfig] = useState({
@@ -120,12 +120,11 @@ export default function BotPage() {
       
       const matic = parseFloat(ethers.formatEther(maticWei));
       const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
-      // Fix typo: briddcUsdcWei should be bridgedUsdcWei
       const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
-      setBridgedUsdcBalance(bridgedUsdc);
+      setBridgedUsdcBalance(bridgedUsdc); // Fixed typo here
       
       return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
@@ -155,9 +154,9 @@ export default function BotPage() {
 
   const recordExecution = useCallback(async (executionData) => {
     try {
-      // ONLY create in the database. The UI will pick it up automatically.
-      await BotExecution.create(executionData);
-      console.log(`💾 BOT: Recorded execution to DB: ${executionData.execution_type} - ${executionData.status}`);
+      console.log("BOT: About to save execution:", executionData.execution_type, "-", executionData.status);
+      const savedRecord = await BotExecution.create(executionData);
+      console.log("BOT: Successfully saved execution with ID:", savedRecord?.id);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
