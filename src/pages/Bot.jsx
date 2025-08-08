@@ -55,16 +55,15 @@ export default function BotPage() {
   const [executions, setExecutions] = useState([]);
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
-  // NEW: Track which opportunities we've already traded locally
-  const [tradedOpportunityIds, setTradedOpportunityIds] = useState(new Set());
-
   const providerRef = useRef(null);
   const walletRef = useRef(null);
   const nativeUsdcContractRef = useRef(null);
   const bridgedUsdcContractRef = useRef(null);
   const intervalRef = useRef(null);
+  // CORE FIX: Use a ref to track traded IDs, which is stable across re-renders and not stale in intervals.
+  const tradedOpportunityIdsRef = useRef(new Set());
 
-  const initializeEngine = useCallback(async (currentConfig) => {
+  const initializeEngine = useCallback(async () => {
     try {
       const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
       const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
@@ -82,17 +81,16 @@ export default function BotPage() {
       bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       
       setIsLive(true);
-      console.log(`✅ LIVE MODE INITIALIZED. Wallet connected: ${address}`);
       return true;
     } catch (error) {
-      console.error("❌ LIVE INITIALIZATION FAILED:", error.message);
+      console.error("LIVE INITIALIZATION FAILED:", error.message);
       setIsLive(false);
       return false;
     }
   }, []);
 
   const fetchRealBalances = useCallback(async () => {
-    if (!walletRef.current || !nativeUsdcContractRef.current || !bridgedUsdcContractRef.current) return { totalUsdc: 0 };
+    if (!walletRef.current) return { totalUsdc: 0 };
     try {
       const address = await walletRef.current.getAddress();
       const [maticWei, nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
@@ -109,7 +107,7 @@ export default function BotPage() {
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
-      setBridgedUsdcBalance(bridgedUsdc); // Fix: Changed 'briddcUsdc' to 'bridgedUsdc'
+      setBridgedUsdcBalance(bridgedUsdc);
       
       return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
@@ -129,60 +127,37 @@ export default function BotPage() {
 
   const scanForOpportunities = useCallback(async () => {
     try {
-      console.log(`🔍 SCANNING: Looking for opportunities with status='active'...`);
-      
       const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
         filter: { status: 'active' },
         sort: '-profit_percentage',
         limit: 10 
       });
-
-      // FORCE FIX: Filter out opportunities we've already traded locally
-      const untradedOpportunities = opportunities.filter(opp => {
-        const alreadyTraded = tradedOpportunityIds.has(opp.id);
-        if (alreadyTraded) {
-          console.log(`🚫 SKIPPING opportunity ${opp.id} - already traded this session`);
-        }
-        return !alreadyTraded;
-      });
-
-      console.log(`📊 SCAN RESULT: Found ${opportunities.length} total opportunities, ${untradedOpportunities.length} untraded`);
+      // CORE FIX: Use the ref to get the latest list of traded IDs.
+      const untradedOpportunities = opportunities.filter(opp => !tradedOpportunityIdsRef.current.has(opp.id));
       
       return untradedOpportunities.filter(opp => {
         const minProfit = botConfig?.min_profit_threshold || 0.2;
         return opp.profit_percentage >= minProfit;
       });
     } catch (error) {
-      console.error("❌ ERROR SCANNING FOR OPPORTUNITIES:", error);
+      console.error("Error scanning for opportunities:", error);
       return [];
     }
-  }, [botConfig, tradedOpportunityIds]);
+  }, [botConfig]);
   
   const executeArbitrage = useCallback(async (opportunity) => {
-    console.log(`💰 EXECUTING TRADE: ${opportunity.pair} (ID: ${opportunity.id})`);
-    
-    // FORCE FIX: Immediately mark this opportunity as traded locally
-    setTradedOpportunityIds(prev => new Set([...prev, opportunity.id]));
-    console.log(`✅ OPPORTUNITY ${opportunity.id} MARKED AS TRADED LOCALLY`);
+    // CORE FIX: Add the new ID to the ref immediately.
+    tradedOpportunityIdsRef.current.add(opportunity.id);
 
-    // FIXED: Simulate success/failure for realism
-    const success = Math.random() > 0.15; // 85% success rate
-    const actualProfit = success
-      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25) // Simulate slippage
-      : -(opportunity.estimated_profit * 0.5 || 1); // Failed trade costs something
+    // Mark as executed in the database in the background
+    base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
+
+    const success = Math.random() > 0.15;
     const status = success ? 'completed' : 'failed';
+    const actualProfit = success
+      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
+      : -(opportunity.estimated_profit * 0.5 || 1);
     const gasUsed = (opportunity.gas_estimate || 0.5);
-
-    console.log(`📊 TRADE RESULT: ${opportunity.pair} | Status: ${status} | P&L: $${actualProfit.toFixed(2)}`);
-
-    // CRITICAL FIX: Mark opportunity as executed IMMEDIATELY and await it
-    // Try to update database (but don't rely on it)
-    try {
-      await base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' });
-      console.log(`✅ Database update successful for opportunity ${opportunity.id}`);
-    } catch (error) {
-      console.error(`❌ Database update failed for opportunity ${opportunity.id}:`, error);
-    }
 
     const newExecution = {
       execution_type: 'trade',
@@ -201,18 +176,9 @@ export default function BotPage() {
       }
     };
     
-    // Instantly update the UI with a temporary ID
     setExecutions(prev => [{...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
-
-    // Save execution log to database
-    try {
-      await base44.entities.BotExecution.create(newExecution);
-      console.log(`✅ EXECUTION LOG SAVED SUCCESSFULLY`);
-    } catch (error) {
-      console.error(`❌ FAILED TO SAVE EXECUTION LOG:`, error);
-    }
+    base44.entities.BotExecution.create(newExecution).catch(err => console.error(err));
     
-    // Update daily stats correctly
     setDailyStats(prev => ({
       ...prev,
       trades: prev.trades + 1,
@@ -221,36 +187,27 @@ export default function BotPage() {
       gasUsed: prev.gasUsed + gasUsed
     }));
 
-  }, [tradedOpportunityIds]);
+  }, []); // CORE FIX: Keep this dependency array empty so the function is stable.
 
   const runTradingLoop = useCallback(async () => {
-    console.log("🔍 Starting scan cycle...");
     const { totalUsdc } = await fetchRealBalances();
     const opps = await scanForOpportunities();
-    
-    console.log(`💡 SCAN COMPLETE: ${opps.length} tradeable opportunities found`);
     
     setExecutions(prev => [{ 
       id: Date.now(), 
       created_date: new Date().toISOString(), 
       execution_type: 'scan', 
       status: 'completed', 
-      details: { found: opps.length, total_traded_this_session: tradedOpportunityIds.size }
+      details: { found: opps.length, total_traded_this_session: tradedOpportunityIdsRef.current.size }
     }, ...prev].slice(0, 50));
     
     if (opps.length > 0 && totalUsdc >= botConfig.max_position_size) {
-      console.log('💎 EXECUTING TOP OPPORTUNITY:', opps[0]);
       await executeArbitrage(opps[0]);
-    } else if (opps.length > 0) {
-      console.log(`💰 Opportunity available but insufficient balance: $${totalUsdc.toFixed(2)} < $${botConfig.max_position_size} required`);
-    } else {
-      console.log(`⏰ NO NEW OPPORTUNITIES FOUND. Total opportunities traded this session: ${tradedOpportunityIds.size}`);
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, botConfig, tradedOpportunityIds]);
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, botConfig]);
 
   const handleToggleBot = async () => {
     if (isRunning) {
-      console.log("🛑 Stopping bot...");
       setIsRunning(false);
       setIsLive(false);
       if (intervalRef.current) {
@@ -258,23 +215,15 @@ export default function BotPage() {
         intervalRef.current = null;
       }
       setWalletAddress(null);
-      // Reset traded opportunities when bot stops
-      setTradedOpportunityIds(new Set()); 
     } else {
-      console.log("🚀 Starting bot...");
-      // Reset traded opportunities when bot starts
-      setTradedOpportunityIds(new Set()); 
-      const success = await initializeEngine(botConfig);
+      // CORE FIX: Reset the traded IDs ref each time the bot starts.
+      tradedOpportunityIdsRef.current = new Set();
+      setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 }); // Reset stats
+      const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
-        await runTradingLoop();
-        
-        intervalRef.current = setInterval(() => {
-          console.log("⏰ Running scheduled scan...");
-          runTradingLoop();
-        }, 15000);
-        
-        console.log("✅ Bot started successfully.");
+        await runTradingLoop(); // Run immediately on start
+        intervalRef.current = setInterval(runTradingLoop, 15000);
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
@@ -318,19 +267,20 @@ export default function BotPage() {
           </Button>
         </div>
 
-        {/* FIXED: Clearer UI messaging about the bot's status */}
         {!isRunning ? (
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertTriangle className="w-4 h-4" />
             <AlertDescription className="text-amber-800">
-              <strong>Bot Stopped:</strong> The bot is currently offline. Click Start to connect to your wallet.
+              <strong>Bot Offline:</strong> Click Start to connect your wallet and begin analysis.
             </AlertDescription>
           </Alert>
         ) : (
-          <Alert className="mb-6 border-emerald-200 bg-emerald-50">
-            <ShieldCheck className="w-4 h-4" />
-            <AlertDescription className="text-emerald-800">
-              <strong>Bot Active (Live Simulation):</strong> Connected to wallet <code className="text-xs">{walletAddress}</code>. Using live market data to <strong>simulate</strong> trades. No real funds are being spent.
+          <Alert className="mb-6 border-blue-200 bg-blue-50">
+            <ShieldCheck className="w-4 h-4 text-blue-700" />
+            <AlertDescription className="text-blue-800">
+              <strong>Connected & Analyzing:</strong> Wallet <code className="text-xs">{walletAddress}</code> connected. 
+              Using real balance (${(nativeUsdcBalance + bridgedUsdcBalance).toFixed(2)}) and live market data. 
+              <strong>Transactions are simulated</strong> - no funds spent during testing phase.
             </AlertDescription>
           </Alert>
         )}
