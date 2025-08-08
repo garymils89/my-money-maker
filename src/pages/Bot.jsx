@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,8 +22,8 @@ import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
 
-import { BotExecution } from "@/api/entities";
-import { ArbitrageOpportunity } from "@/api/entities";
+import { BotExecution } from "@/entities/BotExecution";
+import { ArbitrageOpportunity } from "@/entities/ArbitrageOpportunity";
 import { ethers } from "ethers";
 
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
@@ -69,8 +70,8 @@ export default function BotPage() {
   // Use a Web Worker to run the trading loop in the background
   const workerRef = useRef(null);
 
+  // This effect sets up the background worker for the trading loop
   useEffect(() => {
-    // This effect sets up the background worker for the trading loop
     const code = `
       let intervalId = null;
       self.onmessage = function(e) {
@@ -92,16 +93,15 @@ export default function BotPage() {
 
     workerRef.current.onmessage = () => {
       // When the worker 'ticks', run the trading loop
-      if (isRunning) {
-         runTradingLoop();
-      }
+      // No need to check isRunning here, the worker is only started when it's running
+      runTradingLoop();
     };
 
     // Cleanup worker on component unmount
     return () => {
       workerRef.current.terminate();
     };
-  }, [isRunning]); // Rerun if isRunning changes to have correct state in closure
+  }, [runTradingLoop]); // Depend on runTradingLoop to ensure the worker always has the latest version
 
 
   const initializeEngine = useCallback(async () => {
@@ -188,7 +188,7 @@ export default function BotPage() {
     }
   }, [botConfig]);
 
-  const recordExecution = async (executionData) => {
+  const recordExecution = useCallback(async (executionData) => {
     const finalExecution = {
       ...executionData,
       id: 'temp-' + Date.now(),
@@ -200,7 +200,7 @@ export default function BotPage() {
     } catch(err) {
       console.error("Failed to save execution record:", err);
     }
-  };
+  }, []);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
     const grossProfit = config.amount * (opportunity.profit_percentage / 100);
