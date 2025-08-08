@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -178,7 +177,7 @@ export default function BotExecutionLog({ executions = [] }) {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-semibold text-slate-900 capitalize">
-                          {execution.execution_type.replace('_', ' ')} {/* Replaced _ with space */}
+                          {execution.execution_type.replace(/_/g, ' ')}
                         </span>
                         <Badge className={getStatusColor(execution.status)}>
                           {execution.status}
@@ -222,7 +221,7 @@ export default function BotExecutionLog({ executions = [] }) {
                           
                           {execution.execution_type === 'scan' && (
                             <div>
-                              <span className="font-medium">Opportunities Found:</span> {execution.details.opportunities_found || 0}
+                              <span className="font-medium">Opportunities Found:</span> {execution.details.found || 0}
                             </div>
                           )}
                           
