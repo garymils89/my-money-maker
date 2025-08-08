@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,40 +16,9 @@ import {
   Lightbulb
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BotExecution } from "@/api/entities";
 
-export default function LiveActivityFeed({ isRunning }) {
-  const [executions, setExecutions] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        console.log("LiveActivityFeed: Attempting to fetch BotExecution data...");
-        
-        // Try the basic list method first
-        const data = await BotExecution.list('-created_date', 50);
-        console.log("LiveActivityFeed: Raw data received:", data);
-        console.log("LiveActivityFeed: Data type:", typeof data);
-        console.log("LiveActivityFeed: Is array?", Array.isArray(data));
-        
-        // Ensure we always work with an array
-        const execArray = Array.isArray(data) ? data : [];
-        setExecutions(execArray);
-        
-        console.log("LiveActivityFeed: Final array length:", execArray.length);
-      } catch (error) {
-        console.error("LiveActivityFeed: Error fetching data:", error);
-        setExecutions([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+// This is now a "dumb" component that just displays the data it receives.
+export default function LiveActivityFeed({ isRunning, executions = [] }) {
 
   const getExecutionIcon = (execution) => {
     const { execution_type, status, details } = execution;
@@ -89,19 +58,6 @@ export default function LiveActivityFeed({ isRunning }) {
     });
   };
 
-  if (isLoading) {
-    return (
-      <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-        <CardContent className="p-6">
-          <div className="text-center py-8">
-            <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3 animate-pulse" />
-            <p className="text-slate-600">Loading bot activity...</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
       <CardHeader className="pb-3">
@@ -121,7 +77,8 @@ export default function LiveActivityFeed({ isRunning }) {
           <AnimatePresence>
             {executions.length > 0 ? (
               <div className="space-y-3">
-                {executions.map((execution) => (
+                {/* We only need to map the first 50 for the live feed to avoid clutter */}
+                {executions.slice(0, 50).map((execution) => (
                   <motion.div
                     key={execution.id}
                     initial={{ opacity: 0, x: -20 }}

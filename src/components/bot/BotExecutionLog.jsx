@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,42 +13,28 @@ import {
   ExternalLink,
   Filter,
   Calendar,
-  Zap // Added Zap icon for flashloans
+  Zap 
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { BotExecution } from "@/api/entities"; // Import entity
+// BotExecution import is no longer directly used in this component as data is passed via props.
+// However, keeping it for completeness if it were ever needed for type checking or other minor utilities.
+// The outline does not explicitly remove it, so it's safer to keep it for now unless it causes issues.
+// For this change, it's irrelevant.
 
-export default function BotExecutionLog() { // REMOVED executions prop
-  const [executions, setExecutions] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+export default function BotExecutionLog({ executions = [] }) {
+  // REMOVED internal state for executions and loading.
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('created_date');
-  const [dateFilter, setDateFilter] = useState('all'); // Add date filter
+  const [dateFilter, setDateFilter] = useState('all'); 
 
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const data = await BotExecution.list('-created_date', 200);
-      setExecutions(data);
-    } catch (error) {
-      console.error("Error loading execution history:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData(); // Load data on component mount
-    const interval = setInterval(loadData, 20000); // Refresh every 20 seconds
-    return () => clearInterval(interval);
-  }, []);
+  // REMOVED loadData and useEffect hooks.
 
   const getExecutionIcon = (type) => {
     switch (type) {
       case 'trade':
         return <TrendingUp className="w-4 h-4 text-emerald-500" />;
-      case 'flashloan_trade': // New case for flashloan trade
+      case 'flashloan_trade': 
         return <Zap className="w-4 h-4 text-purple-500" />;
       case 'scan':
         return <Search className="w-4 h-4 text-blue-500" />;
@@ -74,6 +60,7 @@ export default function BotExecutionLog() { // REMOVED executions prop
     }
   };
 
+  // The component now filters the `executions` prop directly.
   const filteredExecutions = executions
     .filter(exec => {
       if (filter === 'all') return true;
@@ -98,12 +85,12 @@ export default function BotExecutionLog() { // REMOVED executions prop
         case 'week':
           const weekAgo = new Date(now);
           weekAgo.setDate(now.getDate() - 7);
-          weekAgo.setHours(0, 0, 0, 0); // Set time to beginning of the day for accurate comparison
+          weekAgo.setHours(0, 0, 0, 0); 
           return execDate >= weekAgo;
         case 'month':
           const monthAgo = new Date(now);
           monthAgo.setDate(now.getDate() - 30);
-          monthAgo.setHours(0, 0, 0, 0); // Set time to beginning of the day for accurate comparison
+          monthAgo.setHours(0, 0, 0, 0); 
           return execDate >= monthAgo;
         default:
           return true;
@@ -230,18 +217,16 @@ export default function BotExecutionLog() { // REMOVED executions prop
 
           {/* Execution List */}
           <div className="space-y-3 max-h-96 overflow-y-auto">
-            {isLoading && executions.length === 0 ? (
+            {executions.length === 0 ? ( 
               <div className="text-center py-8 text-slate-500">
-                <Activity className="w-12 h-12 mx-auto mb-4 animate-pulse" />
-                <p>Loading execution history...</p>
+                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No executions found.</p>
+                <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
               </div>
             ) : filteredExecutions.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
                 <p>No executions found matching your criteria.</p>
-                {executions.length === 0 && (
-                  <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
-                )}
               </div>
             ) : (
               filteredExecutions.map((execution, index) => (
@@ -292,7 +277,7 @@ export default function BotExecutionLog() { // REMOVED executions prop
                                     (${execution.details.opportunity.netProfitUsd?.toFixed(2)})
                                   </span>
                                 </div>
-                                {execution.details.loanAmount && ( // Display loan amount if present
+                                {execution.details.loanAmount && ( 
                                   <div>
                                       <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
                                   </div>

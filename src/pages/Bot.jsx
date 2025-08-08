@@ -44,7 +44,7 @@ export default function BotPage() {
   const [walletAddress, setWalletAddress] = useState(null);
   
   const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
-  const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0); // Corrected state variable name
+  const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0); 
   const [maticBalance, setMaticBalance] = useState(0);
   
   const [botConfig, setBotConfig] = useState({
@@ -57,8 +57,6 @@ export default function BotPage() {
     stop_loss_percentage: 5
   });
 
-  // Revert to initial object state for flashloanConfig to prevent runtime errors
-  // as its properties (e.g., flashloanConfig.amount) are accessed directly.
   const [flashloanConfig, setFlashloanConfig] = useState({
     enabled: true,
     amount: 25000,
@@ -67,7 +65,7 @@ export default function BotPage() {
   });
   const [lastFlashloanSim, setLastFlashloanSim] = useState(null);
   
-  // REMOVED [executions, setExecutions] - this was the source of the bug.
+  const [executions, setExecutions] = useState([]);
   
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
@@ -124,7 +122,7 @@ export default function BotPage() {
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
-      setBridgedUsdcBalance(bridgedUsdc); // Fixed typo here
+      setBridgedUsdcBalance(bridgedUsdc); 
       
       return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
@@ -133,7 +131,15 @@ export default function BotPage() {
     }
   }, []);
 
-  // REMOVED loadHistoricalExecutions - components will do this themselves.
+  const loadHistoricalExecutions = useCallback(async () => {
+    try {
+      const historicalData = await BotExecution.list('-created_date', 100);
+      setExecutions(historicalData || []);
+      console.log(`📊 BOT: Loaded ${historicalData?.length || 0} historical executions`);
+    } catch(err) {
+      console.error("Error loading historical executions:", err);
+    }
+  }, []);
 
   const scanForOpportunities = useCallback(async () => {
     try {
@@ -154,9 +160,11 @@ export default function BotPage() {
 
   const recordExecution = useCallback(async (executionData) => {
     try {
-      console.log("BOT: About to save execution:", executionData.execution_type, "-", executionData.status);
       const savedRecord = await BotExecution.create(executionData);
-      console.log("BOT: Successfully saved execution with ID:", savedRecord?.id);
+      
+      setExecutions(prevExecutions => [savedRecord, ...prevExecutions]);
+      
+      console.log(`💾 BOT: Recorded and displayed execution: ${savedRecord.execution_type}`);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
@@ -173,7 +181,6 @@ export default function BotPage() {
     
     tradedOpportunityIdsRef.current.add(opportunity.id);
 
-    // Simulate success/failure (90% success rate for flashloans)
     const success = Math.random() > 0.1;
     const status = success ? 'completed' : 'failed';
     const profitRealized = status === 'completed' ? netProfit * (0.95 + Math.random() * 0.05) : -loanFee;
@@ -258,7 +265,6 @@ export default function BotPage() {
         const topOpp = opps[0];
         await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Opportunity Found', message: `Found ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%` } });
         
-        // ALWAYS try flashloan first - it's more profitable
         if (flashloanConfig?.enabled) {
           const grossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
           const loanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
@@ -266,7 +272,7 @@ export default function BotPage() {
           
           await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Flashloan Analysis', message: `Gross: $${grossProfit.toFixed(2)}, Fee: $${loanFee.toFixed(2)}, Net: $${netProfit.toFixed(2)}` } });
           
-          if (netProfit > 1) { // Lower threshold - any profit is good
+          if (netProfit > 1) { 
             await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Decision', message: `Executing flashloan, net profit $${netProfit.toFixed(2)} is acceptable.` } });
             await executeFlashloanArbitrage(topOpp, flashloanConfig);
           } else {
@@ -280,7 +286,6 @@ export default function BotPage() {
       }
     } catch (error) {
       console.error("❌ FLASHLOAN BOT ERROR:", error);
-      // Keep error recording here for general errors in the loop
       recordExecution({
         execution_type: 'error',
         status: 'failed',
@@ -289,17 +294,16 @@ export default function BotPage() {
     }
   }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, executeArbitrage, recordExecution, flashloanConfig, botConfig]);
 
-  // This effect now correctly handles the bot's lifecycle
   useEffect(() => {
     const savedBotState = localStorage.getItem('arbitragebot_running');
     if (savedBotState === 'true' && !isRunning) {
       handleToggleBot(true); 
     }
+    loadHistoricalExecutions();
   }, []);
 
   const handleToggleBot = async (startSilently = false) => {
     if (isRunning) {
-      // --- STOP BOT ---
       console.log("🛑 BOT: Stopping...");
       setIsRunning(false);
       setIsLive(false);
@@ -311,7 +315,6 @@ export default function BotPage() {
       }
       await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Stopped.' } });
     } else {
-      // --- START BOT ---
       if (!startSilently) {
         await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Starting...' } });
       }
@@ -324,10 +327,9 @@ export default function BotPage() {
         setIsRunning(true);
         localStorage.setItem('arbitragebot_running', 'true');
         
-        // Clear any old interval and start a new global one
         if (globalBotInterval) clearInterval(globalBotInterval);
-        runTradingLoop(); // Run immediately on start
-        globalBotInterval = setInterval(runTradingLoop, 15000); // Set interval for subsequent runs
+        runTradingLoop(); 
+        globalBotInterval = setInterval(runTradingLoop, 15000); 
         await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Started Successfully.' } });
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
@@ -335,8 +337,6 @@ export default function BotPage() {
       }
     }
   };
-
-  // REMOVED useEffect for loadHistoricalExecutions as components now fetch their own data.
 
   const getStatusColor = () => isRunning ? 'bg-emerald-500' : 'bg-slate-500';
   const getStatusText = () => isRunning ? 'Active' : 'Stopped';
@@ -439,7 +439,6 @@ export default function BotPage() {
           <div className="bg-white/80 backdrop-blur-sm rounded-lg p-1">
             <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="activity" className="flex items-center gap-2"><Activity className="w-4 h-4" />Live Activity</TabsTrigger>
-              {/* Changed icon for dashboard tab from Activity to History */}
               <TabsTrigger value="dashboard" className="flex items-center gap-2"><History className="w-4 h-4" />History</TabsTrigger>
               <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Config</TabsTrigger>
               <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk</TabsTrigger>
@@ -448,13 +447,11 @@ export default function BotPage() {
           </div>
 
           <TabsContent value="activity">
-            {/* REMOVED executions prop - component is now self-sufficient */}
-            <LiveActivityFeed isRunning={isRunning} />
+            <LiveActivityFeed isRunning={isRunning} executions={executions} />
           </TabsContent>
           
           <TabsContent value="dashboard">
-            {/* REMOVED executions prop */}
-            <BotExecutionLog />
+            <BotExecutionLog executions={executions} />
           </TabsContent>
           
           <TabsContent value="config">
