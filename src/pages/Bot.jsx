@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +14,7 @@ import {
   AlertTriangle,
   Settings,
   Shield,
-  History, // Added History icon for the dashboard tab
+  History,
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
@@ -26,16 +25,15 @@ import LiveActivityFeed from "../components/bot/LiveActivityFeed";
 import { BotExecution } from "@/api/entities";
 import { ArbitrageOpportunity } from "@/api/entities";
 import { ethers } from "ethers";
+import { botStateManager } from "../components/bot/botState"; // Import the new state manager
 
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
 const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
-
 const USDC_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
 
-// Make the interval timer global to prevent it from clearing on page change
 let globalBotInterval = null;
 
 export default function BotPage() {
@@ -65,7 +63,8 @@ export default function BotPage() {
   });
   const [lastFlashloanSim, setLastFlashloanSim] = useState(null);
   
-  const [executions, setExecutions] = useState([]);
+  // This component's state now syncs with the central botState manager
+  const [executions, setExecutions] = useState(botStateManager.getExecutions());
   
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
@@ -74,6 +73,12 @@ export default function BotPage() {
   const nativeUsdcContractRef = useRef(null);
   const bridgedUsdcContractRef = useRef(null);
   const tradedOpportunityIdsRef = useRef(new Set());
+
+  // Subscribe to the central state on mount, unsubscribe on unmount
+  useEffect(() => {
+    const unsubscribe = botStateManager.subscribe(setExecutions);
+    return unsubscribe;
+  }, []);
 
   const initializeEngine = useCallback(async () => {
     try {
@@ -132,12 +137,15 @@ export default function BotPage() {
   }, []);
 
   const loadHistoricalExecutions = useCallback(async () => {
-    try {
-      const historicalData = await BotExecution.list('-created_date', 100);
-      setExecutions(historicalData || []);
-      console.log(`📊 BOT: Loaded ${historicalData?.length || 0} historical executions`);
-    } catch(err) {
-      console.error("Error loading historical executions:", err);
+    // Only load if the central state is empty
+    if (botStateManager.getExecutions().length === 0) {
+      try {
+        const historicalData = await BotExecution.list('-created_date', 100);
+        botStateManager.setAllExecutions(historicalData || []); // Use central state setter
+        console.log(`📊 BOT: Loaded ${historicalData?.length || 0} historical executions into central state`);
+      } catch(err) {
+        console.error("Error loading historical executions:", err);
+      }
     }
   }, []);
 
@@ -160,33 +168,18 @@ export default function BotPage() {
 
   const recordExecution = useCallback(async (executionData) => {
     try {
-      // Add precise timestamp to prevent duplicates
       const timestampedData = {
         ...executionData,
-        created_date: new Date().toISOString() // Ensure we have a precise timestamp
+        created_date: new Date().toISOString()
       };
       
-      // 1. Save to the database for persistence
-      const savedRecord = await BotExecution.create(timestampedData);
+      // Save to DB in the background
+      await BotExecution.create(timestampedData);
       
-      // 2. Add to local state for instant UI update - ADD TO FRONT for most recent first
-      setExecutions(prevExecutions => {
-        // Prevent duplicates by checking if we already have this exact record
-        const isDuplicate = prevExecutions.some(existing => 
-          existing.execution_type === savedRecord.execution_type &&
-          existing.status === savedRecord.status &&
-          Math.abs(new Date(existing.created_date).getTime() - new Date(savedRecord.created_date).getTime()) < 1000 // Within 1 second
-        );
-        
-        if (isDuplicate) {
-          console.log('Skipping duplicate execution record');
-          return prevExecutions;
-        }
-        
-        return [savedRecord, ...prevExecutions.slice(0, 99)]; // Most recent first, keep only latest 100
-      });
+      // Instantly update the central state, which notifies this component
+      botStateManager.addExecution(timestampedData);
       
-      console.log(`💾 BOT: Recorded execution: ${savedRecord.execution_type} at ${new Date(savedRecord.created_date).toLocaleTimeString()}`);
+      console.log(`💾 BOT: Recorded execution: ${timestampedData.execution_type}`);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
@@ -322,7 +315,7 @@ export default function BotPage() {
       handleToggleBot(true); 
     }
     loadHistoricalExecutions();
-  }, []);
+  }, [loadHistoricalExecutions]); // Add dependency here
 
   const handleToggleBot = async (startSilently = false) => {
     if (isRunning) {
@@ -484,7 +477,7 @@ export default function BotPage() {
           </TabsContent>
           <TabsContent value="leverage">
             <LeverageManager onConfigChange={setFlashloanConfig} simulationResult={lastFlashloanSim} />
-          </TabsContent>
+          </Tabs-Content>
         </Tabs>
       </div>
     </div>
