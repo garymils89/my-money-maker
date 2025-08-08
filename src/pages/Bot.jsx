@@ -15,15 +15,15 @@ import {
   AlertTriangle,
   Settings,
   Shield,
-  ShieldCheck // ADDED: ShieldCheck import
+  ShieldCheck
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
 
-import { base44 } from "@/api/base44Client"; // ADDED base44 import
-import { ethers } from "ethers"; // ADDED ethers import
+import { base44 } from "@/api/base44Client";
+import { ethers } from "ethers";
 
 const USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Polygon USDC
 const USDC_ABI = [
@@ -100,6 +100,10 @@ class LiveTradingEngine {
     }
   }
 
+  getDailyStats() {
+    return this.dailyStats;
+  }
+
   // --- AAVE FUNCTIONS (Still simulated until fully implemented) ---
   async getAavePosition() {
     // This remains a simulation for now.
@@ -131,8 +135,8 @@ class LiveTradingEngine {
 
     const success = Math.random() > 0.15; // 85% success rate
     const actualProfit = success
-      ? opportunity.netProfitUsd * (0.85 + Math.random() * 0.25) // Simulate slippage
-      : -(opportunity.gasEstimate * 1.5); // Simulate a failed trade cost
+      ? opportunity.net_profit_usd * (0.85 + Math.random() * 0.25) // Simulate slippage
+      : -(opportunity.gas_estimate * 1.5); // Simulate a failed trade cost
 
     if (success) {
       this.dailyStats.profit += actualProfit;
@@ -140,12 +144,12 @@ class LiveTradingEngine {
       this.dailyStats.loss += Math.abs(actualProfit);
     }
     this.dailyStats.trades++;
-    this.dailyStats.gasUsed += opportunity.gasEstimate;
+    this.dailyStats.gasUsed += opportunity.gas_estimate;
 
     const result = {
       success,
       profit: parseFloat(actualProfit.toFixed(4)),
-      gasUsed: parseFloat(opportunity.gasEstimate.toFixed(4)),
+      gasUsed: parseFloat(opportunity.gas_estimate.toFixed(4)),
       txHash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2),
       simulatedTrade: false, // This is now a LIVE execution log
       executionTime: Date.now(),
@@ -170,48 +174,41 @@ class LiveTradingEngine {
   }
 
   async scanForRealOpportunities() {
-    console.log('🔍 [DEMO] Scanning for opportunities...');
+    console.log('🔍 Scanning for live opportunities...');
 
-    const baseSpread = 0.0015 + (Math.random() * 0.002);
-    const volatilityMultiplier = 1 + (Math.random() - 0.5) * 0.3;
+    try {
+      // Fetch active opportunities from the database, sorted by best profit
+      const opportunities = await base44.entities.ArbitrageOpportunity.list({
+        filter: { status: 'active' },
+        sort: '-profit_percentage',
+        limit: 10
+      });
 
-    const opportunities = [
-      {
-        pair: 'USDC/USDT',
-        buyDex: 'QuickSwap',
-        sellDex: 'Curve',
-        buyPrice: 1.0000 - (baseSpread * volatilityMultiplier),
-        sellPrice: 1.0000 + (baseSpread * volatilityMultiplier),
-        riskLevel: 'low',
-        gasEstimate: 0.15,
-        liquidity: 280000
+      // Filter opportunities based on the bot's configuration
+      if (!this.config) {
+        console.warn("Bot config not set, using default filters.");
+        return opportunities;
       }
-    ].map(opp => {
-      const profitPercentage = ((opp.sellPrice - opp.buyPrice) / opp.buyPrice) * 100;
-      // Use max_position_size from config for simulated trade amount if available
-      const maxTradeAmount = this.config?.max_position_size || 300;
-      const netProfitUsd = maxTradeAmount * (profitPercentage / 100);
 
-      return {
-        ...opp,
-        profitPercentage: parseFloat(profitPercentage.toFixed(4)),
-        netProfitUsd: parseFloat(netProfitUsd.toFixed(2)),
-        tradeAmount: parseFloat(maxTradeAmount.toFixed(2)),
-        timestamp: Date.now()
-      };
-    }).filter(opp => {
-      const minProfit = this.config?.min_profit_threshold || 0.2;
-      return opp.profitPercentage >= minProfit;
-    });
+      const filteredOpps = opportunities.filter(opp => {
+        const minProfit = this.config?.min_profit_threshold || 0.2;
+        // You could add more filters here, e.g., by liquidity
+        return opp.profit_percentage >= minProfit;
+      });
 
-    return opportunities.length > 0 ? opportunities : [];
+      return filteredOpps;
+
+    } catch (error) {
+      console.error("Error scanning for opportunities:", error);
+      return [];
+    }
   }
 }
 
 export default function BotPage() {
   const [isRunning, setIsRunning] = useState(false);
-  const [isLive, setIsLive] = useState(false); // ADDED: isLive state
-  const [walletAddress, setWalletAddress] = useState(null); // ADDED: walletAddress state
+  const [isLive, setIsLive] = useState(false);
+  const [walletAddress, setWalletAddress] = useState(null);
   const [botConfig, setBotConfig] = useState({
     bot_name: 'ArbitrageBot',
     min_profit_threshold: 0.2,
@@ -222,7 +219,7 @@ export default function BotPage() {
     stop_loss_percentage: 5
   });
   const [executions, setExecutions] = useState([]);
-  const [walletInfo, setWalletInfo] = useState({ maticBalance: 0, usdcBalance: 0 }); // Changed initial balance to 0
+  const [walletInfo, setWalletInfo] = useState({ maticBalance: 0, usdcBalance: 0 });
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
   const engineRef = useRef(null);
@@ -271,7 +268,7 @@ export default function BotPage() {
       if (
         liveEngine.canTradeLive() &&
         opps.length > 0 &&
-        opps[0].profitPercentage >= minProfit &&
+        opps[0].profit_percentage >= minProfit && // Use profit_percentage from DB
         currentBalances.usdcBalance >= positionSize
       ) {
         console.log('💎 Executing top opportunity:', opps[0]);
