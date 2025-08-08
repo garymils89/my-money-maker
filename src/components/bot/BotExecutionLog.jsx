@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ export default function BotExecutionLog({ executions = [] }) {
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('created_date');
+  const [dateFilter, setDateFilter] = useState('all'); // Add date filter
 
   const getExecutionIcon = (type) => {
     switch (type) {
@@ -59,6 +61,32 @@ export default function BotExecutionLog({ executions = [] }) {
     .filter(exec => {
       if (!searchTerm) return true;
       return JSON.stringify(exec).toLowerCase().includes(searchTerm.toLowerCase());
+    })
+    .filter(exec => {
+      if (dateFilter === 'all') return true;
+      const execDate = new Date(exec.created_date);
+      const now = new Date();
+      
+      switch (dateFilter) {
+        case 'today':
+          return execDate.toDateString() === now.toDateString();
+        case 'yesterday':
+          const yesterday = new Date(now);
+          yesterday.setDate(now.getDate() - 1);
+          return execDate.toDateString() === yesterday.toDateString();
+        case 'week':
+          const weekAgo = new Date(now);
+          weekAgo.setDate(now.getDate() - 7);
+          weekAgo.setHours(0, 0, 0, 0); // Set time to beginning of the day for accurate comparison
+          return execDate >= weekAgo;
+        case 'month':
+          const monthAgo = new Date(now);
+          monthAgo.setDate(now.getDate() - 30);
+          monthAgo.setHours(0, 0, 0, 0); // Set time to beginning of the day for accurate comparison
+          return execDate >= monthAgo;
+        default:
+          return true;
+      }
     })
     .sort((a, b) => {
       if (sortBy === 'created_date') {
@@ -135,11 +163,11 @@ export default function BotExecutionLog({ executions = [] }) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Filter className="w-5 h-5 text-blue-500" />
-            Execution Log
+            Complete Execution History
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 mb-4">
+          <div className="flex gap-4 mb-4 flex-wrap">
             <Select value={filter} onValueChange={setFilter}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Filter by type" />
@@ -147,9 +175,22 @@ export default function BotExecutionLog({ executions = [] }) {
               <SelectContent>
                 <SelectItem value="all">All Events</SelectItem>
                 <SelectItem value="trade">Regular Trades</SelectItem>
-                <SelectItem value="flashloan_trade">Flashloan Trades</SelectItem> {/* New filter item */}
+                <SelectItem value="flashloan_trade">Flashloan Trades</SelectItem>
                 <SelectItem value="scan">Scans Only</SelectItem>
                 <SelectItem value="alert">Alerts Only</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={dateFilter} onValueChange={setDateFilter}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filter by date" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="today">Today Only</SelectItem>
+                <SelectItem value="yesterday">Yesterday Only</SelectItem>
+                <SelectItem value="week">Past Week</SelectItem>
+                <SelectItem value="month">Past Month</SelectItem>
               </SelectContent>
             </Select>
 
@@ -159,6 +200,11 @@ export default function BotExecutionLog({ executions = [] }) {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="max-w-sm"
             />
+          </div>
+
+          {/* Show current filter info */}
+          <div className="mb-4 text-sm text-slate-600">
+            Showing {filteredExecutions.length} of {executions.length} total events
           </div>
 
           {/* Execution List */}
@@ -269,6 +315,9 @@ export default function BotExecutionLog({ executions = [] }) {
             <div className="text-center py-8 text-slate-500">
               <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No executions found matching your criteria.</p>
+              {executions.length === 0 && (
+                <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
+              )}
             </div>
           )}
         </CardContent>
