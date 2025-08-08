@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,12 +16,33 @@ import {
   Zap // Added Zap icon for flashloans
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { BotExecution } from "@/api/entities"; // Import entity
 
-export default function BotExecutionLog({ executions = [] }) {
+export default function BotExecutionLog({ executions: initialExecutions = [] }) {
+  const [executions, setExecutions] = useState(initialExecutions);
+  const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('created_date');
   const [dateFilter, setDateFilter] = useState('all'); // Add date filter
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await BotExecution.list('-created_date', 200);
+      setExecutions(data);
+    } catch (error) {
+      console.error("Error loading execution history:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData(); // Load data on component mount
+    const interval = setInterval(loadData, 20000); // Refresh every 20 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   const getExecutionIcon = (type) => {
     switch (type) {
@@ -209,117 +230,122 @@ export default function BotExecutionLog({ executions = [] }) {
 
           {/* Execution List */}
           <div className="space-y-3 max-h-96 overflow-y-auto">
-            {filteredExecutions.map((execution, index) => (
-              <motion.div
-                key={execution.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="p-4 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
-                    {getExecutionIcon(execution.execution_type)}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-slate-900 capitalize">
-                          {execution.execution_type.replace(/_/g, ' ')}
-                        </span>
-                        <Badge className={getStatusColor(execution.status)}>
-                          {execution.status}
-                        </Badge>
-                        {execution.execution_time_ms && (
-                          <Badge variant="outline" className="text-xs">
-                            {execution.execution_time_ms}ms
+            {isLoading && executions.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <Activity className="w-12 h-12 mx-auto mb-4 animate-pulse" />
+                <p>Loading execution history...</p>
+              </div>
+            ) : filteredExecutions.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No executions found matching your criteria.</p>
+                {executions.length === 0 && (
+                  <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
+                )}
+              </div>
+            ) : (
+              filteredExecutions.map((execution, index) => (
+                <motion.div
+                  key={execution.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="p-4 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      {getExecutionIcon(execution.execution_type)}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-slate-900 capitalize">
+                            {execution.execution_type.replace(/_/g, ' ')}
+                          </span>
+                          <Badge className={getStatusColor(execution.status)}>
+                            {execution.status}
                           </Badge>
+                          {execution.execution_time_ms && (
+                            <Badge variant="outline" className="text-xs">
+                              {execution.execution_time_ms}ms
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        <div className="text-sm text-slate-600 mb-2">
+                          {new Date(execution.created_date).toLocaleString()}
+                        </div>
+
+                        {/* Execution Details */}
+                        {execution.details && (
+                          <div className="text-sm">
+                            {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.details.opportunity && (
+                              <div className="space-y-1">
+                                <div>
+                                  <span className="font-medium">Pair:</span> {execution.details.opportunity.pair}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Route:</span> {execution.details.opportunity.buyDex} → {execution.details.opportunity.sellDex}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Profit:</span> 
+                                  <span className="text-emerald-600 font-semibold ml-1">
+                                    {execution.details.opportunity.profitPercentage?.toFixed(2)}% 
+                                    (${execution.details.opportunity.netProfitUsd?.toFixed(2)})
+                                  </span>
+                                </div>
+                                {execution.details.loanAmount && ( // Display loan amount if present
+                                  <div>
+                                      <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
+                            {execution.execution_type === 'scan' && (
+                              <div>
+                                <span className="font-medium">Opportunities Found:</span> {execution.details.found || 0}
+                              </div>
+                            )}
+                            
+                            {execution.execution_type === 'alert' && (
+                              <div>
+                                <span className="font-medium">{execution.details.alert_type}:</span> {execution.details.message}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Profit/Loss */}
+                        {execution.profit_realized && execution.profit_realized !== 0 && (
+                          <div className="flex items-center gap-4 mt-2 text-sm">
+                            <span className={execution.profit_realized > 0 ? 'text-emerald-600' : 'text-red-600'}>
+                              <span className="font-medium">P&L:</span> 
+                              {execution.profit_realized > 0 ? '+' : ''}${execution.profit_realized.toFixed(2)}
+                            </span>
+                            {execution.gas_used && (
+                              <span className="text-slate-600">
+                                <span className="font-medium">Gas:</span> {execution.gas_used.toFixed(4)} MATIC
+                              </span>
+                            )}
+                          </div>
                         )}
                       </div>
-                      
-                      <div className="text-sm text-slate-600 mb-2">
-                        {new Date(execution.created_date).toLocaleString()}
-                      </div>
-
-                      {/* Execution Details */}
-                      {execution.details && (
-                        <div className="text-sm">
-                          {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.details.opportunity && (
-                            <div className="space-y-1">
-                              <div>
-                                <span className="font-medium">Pair:</span> {execution.details.opportunity.pair}
-                              </div>
-                              <div>
-                                <span className="font-medium">Route:</span> {execution.details.opportunity.buyDex} → {execution.details.opportunity.sellDex}
-                              </div>
-                              <div>
-                                <span className="font-medium">Profit:</span> 
-                                <span className="text-emerald-600 font-semibold ml-1">
-                                  {execution.details.opportunity.profitPercentage?.toFixed(2)}% 
-                                  (${execution.details.opportunity.netProfitUsd?.toFixed(2)})
-                                </span>
-                              </div>
-                              {execution.details.loanAmount && ( // Display loan amount if present
-                                <div>
-                                    <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          
-                          {execution.execution_type === 'scan' && (
-                            <div>
-                              <span className="font-medium">Opportunities Found:</span> {execution.details.found || 0}
-                            </div>
-                          )}
-                          
-                          {execution.execution_type === 'alert' && (
-                            <div>
-                              <span className="font-medium">{execution.details.alert_type}:</span> {execution.details.message}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Profit/Loss */}
-                      {execution.profit_realized && execution.profit_realized !== 0 && (
-                        <div className="flex items-center gap-4 mt-2 text-sm">
-                          <span className={execution.profit_realized > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                            <span className="font-medium">P&L:</span> 
-                            {execution.profit_realized > 0 ? '+' : ''}${execution.profit_realized.toFixed(2)}
-                          </span>
-                          {execution.gas_used && (
-                            <span className="text-slate-600">
-                              <span className="font-medium">Gas:</span> {execution.gas_used.toFixed(4)} MATIC
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
+
+                    {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.status === 'completed' && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        className="text-slate-500 hover:text-slate-700"
+                        onClick={() => window.open('https://polygonscan.com/', '_blank')}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
-
-                  {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.status === 'completed' && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      className="text-slate-500 hover:text-slate-700"
-                      onClick={() => window.open('https://polygonscan.com/', '_blank')}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              ))
+            )}
           </div>
-
-          {filteredExecutions.length === 0 && (
-            <div className="text-center py-8 text-slate-500">
-              <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No executions found matching your criteria.</p>
-              {executions.length === 0 && (
-                <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
-              )}
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>

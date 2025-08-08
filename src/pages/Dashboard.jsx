@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { BotExecution } from "@/api/entities";
 import { motion } from "framer-motion";
@@ -22,6 +23,7 @@ export default function Dashboard() {
   }, []);
 
   const loadData = async () => {
+    setIsLoading(true); // Set loading state
     try {
       // Load ALL bot execution data from the database
       const executionData = await BotExecution.list('-created_date', 1000);
@@ -30,18 +32,18 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Error loading execution data:", error);
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Unset loading state
     }
   };
 
   const calculateStats = (executions) => {
-    const trades = executions.filter(e => 
+    const trades = executions.filter(e =>
       e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'
     );
-    
+
     const completedTrades = trades.filter(e => e.status === 'completed');
     const totalProfit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-    
+
     // Today's data
     const today = new Date();
     const todayTrades = completedTrades.filter(e => {
@@ -49,7 +51,7 @@ export default function Dashboard() {
       return tradeDate.toDateString() === today.toDateString();
     });
     const todayProfit = todayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-    
+
     // Yesterday's data for comparison
     const yesterday = new Date();
     yesterday.setDate(today.getDate() - 1);
@@ -58,7 +60,7 @@ export default function Dashboard() {
       return tradeDate.toDateString() === yesterday.toDateString();
     });
     const yesterdayProfit = yesterdayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-    
+
     // Calculate profit change
     let profitChange = 0;
     if (yesterdayProfit !== 0) {
@@ -68,11 +70,11 @@ export default function Dashboard() {
     }
 
     // Active opportunities (recent scans that found opportunities)
-    const recentScans = executions.filter(e => 
-      e.execution_type === 'scan' && 
+    const recentScans = executions.filter(e =>
+      e.execution_type === 'scan' &&
       new Date(e.created_date) > new Date(Date.now() - 5 * 60 * 1000) // Last 5 minutes
     );
-    const activeOpportunities = recentScans.reduce((sum, scan) => 
+    const activeOpportunities = recentScans.reduce((sum, scan) =>
       sum + (scan.details?.found || 0), 0
     );
 
@@ -98,7 +100,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4"
@@ -111,7 +113,7 @@ export default function Dashboard() {
               Live data from your bot - {executions.length} total events recorded
             </p>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <div className="text-sm text-slate-500">
               Last updated: {lastUpdated.toLocaleTimeString()}
@@ -130,18 +132,22 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Bot Status Alert */}
-        {stats.botRunning ? (
+        {isLoading ? (
+          <Alert className="mb-6 border-blue-200 bg-blue-50">
+            <AlertDescription className="text-blue-800">
+              <strong>Loading live bot data...</strong>
+            </AlertDescription>
+          </Alert>
+        ) : executions.length > 0 ? (
           <Alert className="mb-6 border-emerald-200 bg-emerald-50">
             <AlertDescription className="text-emerald-800">
-              <strong>Bot Status: ACTIVE</strong> - Your trading bot is running and has recorded {executions.length} events. 
-              {stats.totalTrades > 0 ? `Successfully executed ${stats.totalTrades} trades with ${stats.successRate.toFixed(1)}% success rate.` : 'Scanning for profitable opportunities...'}
+              <strong>Live Bot Data:</strong> This dashboard now shows real data from your bot execution history.
             </AlertDescription>
           </Alert>
         ) : (
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertDescription className="text-amber-800">
-              <strong>Bot Status: STOPPED</strong> - Your trading bot is not currently running. 
-              {executions.length > 0 ? `Historical data shows ${executions.length} recorded events.` : 'No activity recorded yet.'}
+              <strong>No bot activity recorded yet</strong> - start the bot to begin collecting data.
             </AlertDescription>
           </Alert>
         )}

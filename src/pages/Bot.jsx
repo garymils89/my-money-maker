@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,9 @@ const USDC_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
+
+// Make the interval timer global to prevent it from clearing on page change
+let globalBotInterval = null;
 
 export default function BotPage() {
   const [isRunning, setIsRunning] = useState(false);
@@ -66,12 +70,11 @@ export default function BotPage() {
   const walletRef = useRef(null);
   const nativeUsdcContractRef = useRef(null);
   const bridgedUsdcContractRef = useRef(null);
-  const intervalRef = useRef(null);
   const tradedOpportunityIdsRef = useRef(new Set());
 
   const initializeEngine = useCallback(async () => {
     try {
-      console.log("🚀 Starting bot engine initialization...");
+      console.log("🚀 BOT: Starting engine initialization...");
       const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
       const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
 
@@ -87,11 +90,11 @@ export default function BotPage() {
       nativeUsdcContractRef.current = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       
-      console.log("✅ Bot engine initialized successfully");
+      console.log("✅ BOT: Engine initialized successfully");
       setIsLive(true);
       return true;
     } catch (error) {
-      console.error("❌ LIVE INITIALIZATION FAILED:", error.message);
+      console.error("❌ BOT: LIVE INITIALIZATION FAILED:", error.message);
       setIsLive(false);
       return false;
     }
@@ -129,9 +132,9 @@ export default function BotPage() {
     try {
       const historicalExecutions = await BotExecution.list('-created_date', 100);
       setExecutions(historicalExecutions);
-      console.log(`📊 Loaded ${historicalExecutions.length} historical executions`);
+      console.log(`📊 BOT: Loaded ${historicalExecutions.length} historical executions`);
     } catch (error) {
-      console.error("Could not load historical executions:", error);
+      console.error("BOT: Could not load historical executions:", error);
     }
   }, []);
 
@@ -147,7 +150,7 @@ export default function BotPage() {
       
       return filteredOpps;
     } catch (error) {
-      console.error("Error scanning for opportunities:", error);
+      console.error("BOT: Error scanning for opportunities:", error);
       return [];
     }
   }, [botConfig]);
@@ -164,14 +167,14 @@ export default function BotPage() {
       };
       setExecutions(prev => [finalExecution, ...prev.slice(0, 49)]);
       
-      console.log(`💾 Recorded execution: ${executionData.execution_type} - ${executionData.status}`);
+      console.log(`💾 BOT: Recorded execution: ${executionData.execution_type} - ${executionData.status}`);
     } catch(err) {
-      console.error("❌ Failed to save execution record:", err);
+      console.error("❌ BOT: Failed to save execution record:", err);
     }
   }, []);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
-    console.log(`⚡ FLASHLOAN: Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
+    console.log(`⚡ BOT: FLASHLOAN - Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
     
     const grossProfit = config.amount * (opportunity.profit_percentage / 100);
     const loanFee = config.amount * (config.fee_percentage / 100);
@@ -180,7 +183,7 @@ export default function BotPage() {
     setLastFlashloanSim({ grossProfit, loanFee, netProfit });
 
     if (netProfit <= 0) {
-      console.log(`❌ FLASHLOAN: Net profit too low: $${netProfit.toFixed(2)}`);
+      console.log(`❌ BOT: FLASHLOAN - Net profit too low: $${netProfit.toFixed(2)}`);
       return;
     }
     
@@ -216,11 +219,11 @@ export default function BotPage() {
       loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
     }));
 
-    console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
+    console.log(`💰 BOT: FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
   }, [recordExecution]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
-    console.log(`📈 REGULAR: Executing ${opportunity.pair}`);
+    console.log(`📈 BOT: REGULAR - Executing ${opportunity.pair}`);
     
     tradedOpportunityIdsRef.current.add(opportunity.id);
     await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
@@ -257,16 +260,16 @@ export default function BotPage() {
       gasUsed: prev.gasUsed + gasUsed
     }));
 
-    console.log(`💰 REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}`);
+    console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}`);
   }, [recordExecution]);
 
   const runTradingLoop = useCallback(async () => {
     try {
-      console.log("🔄 === TRADING LOOP START ===");
+      console.log("🔄 === BOT: TRADING LOOP START ===");
       const { totalUsdc } = await fetchRealBalances();
       const opps = await scanForOpportunities();
       
-      await recordExecution({ 
+      recordExecution({ 
         execution_type: 'scan', 
         status: 'completed', 
         details: { 
@@ -278,25 +281,29 @@ export default function BotPage() {
       
       if (opps.length > 0) {
         const topOpp = opps[0];
-        console.log(`🎯 Top opportunity: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`);
+        console.log(`🎯 BOT: Top opportunity found: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`);
         
-        // ALWAYS try flashloan first if enabled
-        if (flashloanConfig && flashloanConfig.enabled) {
+        if (flashloanConfig?.enabled) {
+          console.log("⚡ BOT: Checking flashloan viability...");
           const potentialGrossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
           const potentialLoanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
           const potentialNetProfit = potentialGrossProfit - potentialLoanFee;
           
-          if (potentialNetProfit > 5) {
+          if (potentialNetProfit > 5) { // Profitability threshold for flashloan
+            console.log(`✅ BOT: Flashloan is profitable ($${potentialNetProfit.toFixed(2)}), executing...`);
             await executeFlashloanArbitrage(topOpp, flashloanConfig);
-            return; // Exit after flashloan execution
+            return; 
+          } else {
+            console.log(`❌ BOT: Flashloan not profitable enough ($${potentialNetProfit.toFixed(2)}). Checking regular trade.`);
           }
         }
         
-        // Fallback to regular arbitrage
-        if (totalUsdc >= botConfig.max_position_size) {
+        if (totalUsdc >= (botConfig?.max_position_size || 300)) {
+           console.log("📈 BOT: Executing regular arbitrage trade.");
           await executeArbitrage(topOpp);
         } else {
-          await recordExecution({
+          console.log(`⚠️ BOT: Insufficient balance for regular trade: ${totalUsdc.toFixed(2)} < ${botConfig.max_position_size}`);
+          recordExecution({
             execution_type: 'alert',
             status: 'completed',
             details: {
@@ -305,11 +312,13 @@ export default function BotPage() {
             }
           });
         }
+      } else {
+        console.log(".. BOT: No profitable opportunities found this cycle.");
       }
-      console.log("✅ === TRADING LOOP END ===");
+      console.log("✅ === BOT: TRADING LOOP END ===");
     } catch (error) {
-      console.error("❌ Trading loop error:", error);
-      await recordExecution({
+      console.error("❌ BOT: Trading loop error:", error);
+      recordExecution({
         execution_type: 'error',
         status: 'failed',
         error_message: error.message
@@ -317,54 +326,47 @@ export default function BotPage() {
     }
   }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig, recordExecution]);
 
-  // Persistent background execution
+  // Check localStorage on initial load to see if bot should be running
   useEffect(() => {
     const savedBotState = localStorage.getItem('arbitragebot_running');
-    if (savedBotState === 'true') {
-      setIsRunning(true);
-      initializeEngine();
+    if (savedBotState === 'true' && !isRunning) {
+      handleToggleBot(true); // Start bot if it was running before
     }
-  }, [initializeEngine]);
+  }, []); // Empty dependency array means this runs once on mount
 
-  useEffect(() => {
+  const handleToggleBot = async (startSilently = false) => {
     if (isRunning) {
-      localStorage.setItem('arbitragebot_running', 'true');
-      
-      const interval = setInterval(() => {
-        runTradingLoop();
-      }, 15000);
-      intervalRef.current = interval;
-      
-      // Run immediately
-      runTradingLoop();
-      
-      return () => {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-        }
-      };
-    } else {
-      localStorage.setItem('arbitragebot_running', 'false');
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    }
-  }, [isRunning, runTradingLoop]);
-
-  const handleToggleBot = async () => {
-    if (isRunning) {
+      // --- STOP BOT ---
+      console.log("🛑 BOT: Stopping...");
       setIsRunning(false);
       setIsLive(false);
       setWalletAddress(null);
+      localStorage.setItem('arbitragebot_running', 'false');
+      if (globalBotInterval) {
+        clearInterval(globalBotInterval);
+        globalBotInterval = null;
+      }
     } else {
+      // --- START BOT ---
+      if (!startSilently) {
+        alert("Bot is starting! Check the F12 console to see live activity.");
+      }
+      console.log("🚀 BOT: Starting...");
       tradedOpportunityIdsRef.current = new Set();
       setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
       
       const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
+        localStorage.setItem('arbitragebot_running', 'true');
+        
+        // Clear any old interval and start a new global one
+        if (globalBotInterval) clearInterval(globalBotInterval);
+        runTradingLoop(); // Run immediately on start
+        globalBotInterval = setInterval(runTradingLoop, 15000); // Set interval for subsequent runs
+        
       } else {
-        alert("LIVE MODE FAILED: Check console for errors.");
+        alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
     }
   };
@@ -402,7 +404,7 @@ export default function BotPage() {
           </div>
 
           <Button
-            onClick={handleToggleBot}
+            onClick={() => handleToggleBot()} // Call without arguments for manual toggle
             className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
           >
             {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
