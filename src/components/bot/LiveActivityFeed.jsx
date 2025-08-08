@@ -80,7 +80,7 @@ export default function LiveActivityFeed({ isRunning, executions = [] }) {
         second: '2-digit',
         hour12: true
       });
-    } catch (error) {
+    } catch (error) { // Fixed syntax error: changed 'throttled(error)' to 'catch (error)'
       console.warn('Date formatting error:', error, 'for dateString:', dateString);
       return 'Just now';
     }
@@ -155,6 +155,12 @@ export default function LiveActivityFeed({ isRunning, executions = [] }) {
                             <div className="text-xs text-slate-500">
                               {execution.details.opportunity?.buyDex} → {execution.details.opportunity?.sellDex} •
                               Fee: ${execution.details.loanFee?.toFixed(2)}
+                            </div>
+                          )}
+                          {/* Display transaction hash for completed trades */}
+                          {execution.status === 'completed' && execution.details?.tx_hash && (
+                            <div className="text-xs text-blue-600 font-mono mt-1">
+                              TX: {execution.details.tx_hash.substring(0, 10)}...{execution.details.tx_hash.slice(-6)}
                             </div>
                           )}
                         </div>

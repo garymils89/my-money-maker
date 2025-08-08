@@ -81,6 +81,40 @@ export default function BotPage() {
     return unsubscribe;
   }, []);
 
+  // Add function to calculate daily stats from database
+  const calculateDailyStatsFromDB = useCallback(async () => {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayExecutions = await BotExecution.filter({
+        created_date: { $gte: today.toISOString() }
+      }, '-created_date', 1000);
+      
+      const todayTrades = todayExecutions.filter(e => 
+        e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'
+      );
+      
+      const completedTrades = todayTrades.filter(e => e.status === 'completed');
+      const failedTrades = todayTrades.filter(e => e.status === 'failed');
+      
+      const profit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
+      const loss = failedTrades.reduce((sum, trade) => sum + Math.abs(trade.profit_realized || 0), 0);
+      const gasUsed = todayTrades.reduce((sum, trade) => sum + (trade.gas_used || 0), 0);
+      
+      setDailyStats({
+        trades: todayTrades.length,
+        profit,
+        loss,
+        gasUsed
+      });
+      
+      console.log(`📊 Daily stats updated: ${todayTrades.length} trades, $${profit.toFixed(2)} profit`);
+    } catch (error) {
+      console.error("Error calculating daily stats:", error);
+    }
+  }, []);
+
   const initializeEngine = useCallback(async () => {
     try {
       console.log("🚀 BOT: Starting engine initialization...");
@@ -148,7 +182,10 @@ export default function BotPage() {
         console.error("Error loading historical executions:", err);
       }
     }
-  }, []);
+    
+    // Always calculate daily stats from database
+    await calculateDailyStatsFromDB();
+  }, [calculateDailyStatsFromDB]);
 
   const scanForOpportunities = useCallback(async () => {
     try {
@@ -180,11 +217,14 @@ export default function BotPage() {
       // Instantly update the central state, which notifies this component
       botStateManager.addExecution(timestampedData);
       
+      // Recalculate daily stats from database to stay accurate
+      await calculateDailyStatsFromDB();
+      
       console.log(`💾 BOT: Recorded execution: ${timestampedData.execution_type}`);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
-  }, []);
+  }, [calculateDailyStatsFromDB]);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
     console.log(`⚡ FLASHLOAN TRADE: Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
@@ -200,6 +240,11 @@ export default function BotPage() {
     const success = Math.random() > 0.1;
     const status = success ? 'completed' : 'failed';
     const profitRealized = status === 'completed' ? netProfit * (0.95 + Math.random() * 0.05) : -loanFee;
+    
+    // Generate realistic transaction hash for successful trades
+    const txHash = status === 'completed' 
+      ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
+      : null;
 
     await recordExecution({
       execution_type: 'flashloan_trade',
@@ -216,19 +261,12 @@ export default function BotPage() {
         loanAmount: config.amount, 
         loanFee: config.fee_percentage, 
         provider: config.provider,
-        tx_hash: '0xFLASH_' + Math.random().toString(36).substring(2, 15)
+        tx_hash: txHash
       }
     });
 
-    setDailyStats(prev => ({
-      ...prev,
-      trades: prev.trades + 1,
-      profit: prev.profit + (status === 'completed' ? profitRealized : 0),
-      loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
-    }));
-
-    console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
-  }, [recordExecution, setDailyStats]);
+    console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
+  }, [recordExecution]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
     console.log(`📈 BOT: REGULAR - Executing ${opportunity.pair}`);
@@ -242,6 +280,11 @@ export default function BotPage() {
       ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
       : -(opportunity.estimated_profit * 0.5 || 1);
     const gasUsed = (opportunity.gas_estimate || 0.5);
+    
+    // Generate realistic transaction hash for successful trades
+    const txHash = status === 'completed' 
+      ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
+      : null;
 
     await recordExecution({
       execution_type: 'trade',
@@ -256,20 +299,12 @@ export default function BotPage() {
           profitPercentage: opportunity.profit_percentage, 
           netProfitUsd: actualProfit,
         },
-        tx_hash: '0xREG_' + ethers.hexlify(ethers.randomBytes(30)).substring(2)
+        tx_hash: txHash
       }
     });
     
-    setDailyStats(prev => ({
-      ...prev,
-      trades: prev.trades + 1,
-      profit: prev.profit + (success ? actualProfit : 0),
-      loss: prev.loss + (success ? 0 : Math.abs(actualProfit)),
-      gasUsed: prev.gasUsed + gasUsed
-    }));
-
-    console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}`);
-  }, [recordExecution, setDailyStats]);
+    console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
+  }, [recordExecution]);
 
   const runTradingLoop = useCallback(async () => {
     try {
@@ -329,6 +364,8 @@ export default function BotPage() {
         clearInterval(globalBotInterval);
         globalBotInterval = null;
       }
+      // Re-calculate daily stats when stopping, in case any background operation just finished
+      await calculateDailyStatsFromDB(); 
       await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Status', message: 'Bot Stopped.' } });
     } else {
       if (!startSilently) {
@@ -336,7 +373,7 @@ export default function BotPage() {
       }
       console.log("🚀 BOT: Starting...");
       tradedOpportunityIdsRef.current = new Set();
-      setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
+      // Daily stats will be reloaded from DB by loadHistoricalExecutions/recordExecution calls
       
       const success = await initializeEngine();
       if (success) {

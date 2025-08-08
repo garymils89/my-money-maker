@@ -282,6 +282,15 @@ export default function BotExecutionLog({ executions = [] }) {
                                       <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
                                   </div>
                                 )}
+                                {/* Display transaction hash */}
+                                {execution.status === 'completed' && execution.details.tx_hash && (
+                                  <div>
+                                    <span className="font-medium">TX Hash:</span> 
+                                    <span className="font-mono text-blue-600 ml-1 text-xs">
+                                      {execution.details.tx_hash}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             )}
                             
