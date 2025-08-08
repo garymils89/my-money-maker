@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +14,6 @@ import {
   AlertTriangle,
   Settings,
   Shield,
-  EyeOff,
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
@@ -37,7 +35,6 @@ const USDC_ABI = [
 export default function BotPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [isLive, setIsLive] = useState(false);
-  const [isTabActive, setIsTabActive] = useState(true);
   const [walletAddress, setWalletAddress] = useState(null);
   
   const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
@@ -66,43 +63,7 @@ export default function BotPage() {
   const bridgedUsdcContractRef = useRef(null);
   const intervalRef = useRef(null);
   const tradedOpportunityIdsRef = useRef(new Set());
-
-  // Use a Web Worker to run the trading loop in the background
   const workerRef = useRef(null);
-
-  // This effect sets up the background worker for the trading loop
-  useEffect(() => {
-    const code = `
-      let intervalId = null;
-      self.onmessage = function(e) {
-        if (e.data.action === 'start') {
-          if (intervalId) clearInterval(intervalId);
-          // Run immediately, then start interval
-          self.postMessage('tick');
-          intervalId = setInterval(() => {
-            self.postMessage('tick');
-          }, e.data.interval);
-        } else if (e.data.action === 'stop') {
-          if (intervalId) clearInterval(intervalId);
-          intervalId = null;
-        }
-      }
-    `;
-    const blob = new Blob([code], { type: 'application/javascript' });
-    workerRef.current = new Worker(URL.createObjectURL(blob));
-
-    workerRef.current.onmessage = () => {
-      // When the worker 'ticks', run the trading loop
-      // No need to check isRunning here, the worker is only started when it's running
-      runTradingLoop();
-    };
-
-    // Cleanup worker on component unmount
-    return () => {
-      workerRef.current.terminate();
-    };
-  }, [runTradingLoop]); // Depend on runTradingLoop to ensure the worker always has the latest version
-
 
   const initializeEngine = useCallback(async () => {
     try {
@@ -160,7 +121,7 @@ export default function BotPage() {
 
   const loadHistoricalExecutions = useCallback(async () => {
     try {
-      const historicalExecutions = await BotExecution.list({ sort: '-created_date', limit: 100 });
+      const historicalExecutions = await BotExecution.list('-created_date', 100);
       setExecutions(historicalExecutions);
     } catch (error) {
       console.error("Could not load historical executions:", error);
@@ -169,11 +130,7 @@ export default function BotPage() {
 
   const scanForOpportunities = useCallback(async () => {
     try {
-      const opportunities = await ArbitrageOpportunity.list({ 
-        filter: { status: 'active' },
-        sort: '-profit_percentage',
-        limit: 10 
-      });
+      const opportunities = await ArbitrageOpportunity.list('-profit_percentage', 10);
       const untradedOpportunities = opportunities.filter(opp => !tradedOpportunityIdsRef.current.has(opp.id));
       
       const filteredOpps = untradedOpportunities.filter(opp => {
@@ -243,7 +200,7 @@ export default function BotPage() {
     tradedOpportunityIdsRef.current.add(opportunity.id);
     await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    const success = Math.random() > 0.15; // 85% success rate for simulation
+    const success = Math.random() > 0.15;
     const status = success ? 'completed' : 'failed';
     const actualProfit = success
       ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
@@ -334,11 +291,31 @@ export default function BotPage() {
     }
   }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig, recordExecution]);
 
+  useEffect(() => {
+    if (isRunning) {
+      const interval = setInterval(() => {
+        runTradingLoop();
+      }, 15000);
+      intervalRef.current = interval;
+      
+      // Run immediately
+      runTradingLoop();
+      
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+        }
+      };
+    }
+  }, [isRunning, runTradingLoop]);
+
   const handleToggleBot = async () => {
     if (isRunning) {
       setIsRunning(false);
       setIsLive(false);
-      workerRef.current.postMessage({ action: 'stop' });
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
       setWalletAddress(null);
     } else {
       tradedOpportunityIdsRef.current = new Set();
@@ -347,8 +324,6 @@ export default function BotPage() {
       const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
-        // Start the background worker
-        workerRef.current.postMessage({ action: 'start', interval: 15000 });
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
@@ -398,7 +373,7 @@ export default function BotPage() {
         <Alert className="mb-6 border-blue-200 bg-blue-50">
           <Bot className="w-4 h-4" />
           <AlertDescription className="text-blue-800">
-            <strong>Bot Runs in Background:</strong> The trading logic now runs in a background thread, so it will continue to execute even if this tab is not active.
+            <strong>Bot Runs Continuously:</strong> The trading logic runs every 15 seconds in the background, even when you navigate to other pages.
           </AlertDescription>
         </Alert>
 
