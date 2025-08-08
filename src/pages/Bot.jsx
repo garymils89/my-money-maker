@@ -160,11 +160,33 @@ export default function BotPage() {
 
   const recordExecution = useCallback(async (executionData) => {
     try {
-      const savedRecord = await BotExecution.create(executionData);
+      // Add precise timestamp to prevent duplicates
+      const timestampedData = {
+        ...executionData,
+        created_date: new Date().toISOString() // Ensure we have a precise timestamp
+      };
       
-      setExecutions(prevExecutions => [savedRecord, ...prevExecutions]);
+      // 1. Save to the database for persistence
+      const savedRecord = await BotExecution.create(timestampedData);
       
-      console.log(`💾 BOT: Recorded and displayed execution: ${savedRecord.execution_type}`);
+      // 2. Add to local state for instant UI update - ADD TO FRONT for most recent first
+      setExecutions(prevExecutions => {
+        // Prevent duplicates by checking if we already have this exact record
+        const isDuplicate = prevExecutions.some(existing => 
+          existing.execution_type === savedRecord.execution_type &&
+          existing.status === savedRecord.status &&
+          Math.abs(new Date(existing.created_date).getTime() - new Date(savedRecord.created_date).getTime()) < 1000 // Within 1 second
+        );
+        
+        if (isDuplicate) {
+          console.log('Skipping duplicate execution record');
+          return prevExecutions;
+        }
+        
+        return [savedRecord, ...prevExecutions.slice(0, 99)]; // Most recent first, keep only latest 100
+      });
+      
+      console.log(`💾 BOT: Recorded execution: ${savedRecord.execution_type} at ${new Date(savedRecord.created_date).toLocaleTimeString()}`);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
@@ -198,7 +220,7 @@ export default function BotPage() {
           netProfitUsd: profitRealized,
         },
         loanAmount: config.amount, 
-        loanFee: loanFee, 
+        loanFee: config.fee_percentage, 
         provider: config.provider,
         tx_hash: '0xFLASH_' + Math.random().toString(36).substring(2, 15)
       }

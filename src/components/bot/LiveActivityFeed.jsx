@@ -34,6 +34,7 @@ export default function LiveActivityFeed({ isRunning, executions = [] }) {
             case 'Flashloan Analysis': return <Info className="w-4 h-4 text-blue-500" />;
             case 'Decision': return <CheckCircle className="w-4 h-4 text-green-500" />;
             case 'Scan Result': return <Search className="w-4 h-4 text-slate-500" />;
+            case 'Status': return <Info className="w-4 h-4 text-blue-500" />;
             default: return <Info className="w-4 h-4 text-slate-500" />;
         }
     }
@@ -50,12 +51,39 @@ export default function LiveActivityFeed({ isRunning, executions = [] }) {
   };
 
   const formatTime = (dateString) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    try {
+      // Handle both ISO strings and timestamp numbers
+      let date;
+      if (typeof dateString === 'number') {
+        // If it's a timestamp number, convert to Date
+        date = new Date(dateString);
+      } else if (typeof dateString === 'string') {
+        // If it's a string, try to parse it
+        date = new Date(dateString);
+      } else {
+        // Fallback to current time if invalid
+        date = new Date();
+      }
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Just now';
+      }
+      
+      // Return your preferred format: Jan 15, 2025  2:30:45 PM
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      console.warn('Date formatting error:', error, 'for dateString:', dateString);
+      return 'Just now';
+    }
   };
 
   return (
@@ -77,10 +105,13 @@ export default function LiveActivityFeed({ isRunning, executions = [] }) {
           <AnimatePresence>
             {executions.length > 0 ? (
               <div className="space-y-3">
-                {/* We only need to map the first 50 for the live feed to avoid clutter */}
-                {executions.slice(0, 50).map((execution) => (
+                {/* Sort executions by created_date descending to show most recent first */}
+                {executions
+                  .sort((a, b) => new Date(b.created_date) - new Date(a.created_date))
+                  .slice(0, 50)
+                  .map((execution, index) => (
                   <motion.div
-                    key={execution.id}
+                    key={`${execution.id}-${index}`} // Better key to handle potential duplicates
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.2 }}
