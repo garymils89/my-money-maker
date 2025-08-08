@@ -116,7 +116,7 @@ export default function BotPage() {
       
       const matic = parseFloat(ethers.formatEther(maticWei));
       const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
-      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgecUsdcWei, Number(bridgedDecimals)));
+      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
