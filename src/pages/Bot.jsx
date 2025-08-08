@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,14 +14,15 @@ import {
   AlertTriangle,
   Settings,
   Shield,
-  ShieldCheck,
+  EyeOff,
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
 
-import { base44 } from "@/api/base44Client";
+import { BotExecution } from "@/api/entities";
+import { ArbitrageOpportunity } from "@/api/entities";
 import { ethers } from "ethers";
 
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
@@ -36,8 +36,8 @@ const USDC_ABI = [
 export default function BotPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [isTabActive, setIsTabActive] = useState(true);
   const [walletAddress, setWalletAddress] = useState(null);
-  const [diagnostics, setDiagnostics] = useState({ lastScan: null, errors: [] });
   
   const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
   const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0);
@@ -66,43 +66,64 @@ export default function BotPage() {
   const intervalRef = useRef(null);
   const tradedOpportunityIdsRef = useRef(new Set());
 
-  const addDiagnostic = (message, type = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
-    setDiagnostics(prev => ({
-      ...prev,
-      errors: [{timestamp, message, type}, ...prev.errors.slice(0, 9)]
-    }));
-    console.log(`[${timestamp}] ${type.toUpperCase()}: ${message}`);
-  };
+  // Use a Web Worker to run the trading loop in the background
+  const workerRef = useRef(null);
+
+  useEffect(() => {
+    // This effect sets up the background worker for the trading loop
+    const code = `
+      let intervalId = null;
+      self.onmessage = function(e) {
+        if (e.data.action === 'start') {
+          if (intervalId) clearInterval(intervalId);
+          // Run immediately, then start interval
+          self.postMessage('tick');
+          intervalId = setInterval(() => {
+            self.postMessage('tick');
+          }, e.data.interval);
+        } else if (e.data.action === 'stop') {
+          if (intervalId) clearInterval(intervalId);
+          intervalId = null;
+        }
+      }
+    `;
+    const blob = new Blob([code], { type: 'application/javascript' });
+    workerRef.current = new Worker(URL.createObjectURL(blob));
+
+    workerRef.current.onmessage = () => {
+      // When the worker 'ticks', run the trading loop
+      if (isRunning) {
+         runTradingLoop();
+      }
+    };
+
+    // Cleanup worker on component unmount
+    return () => {
+      workerRef.current.terminate();
+    };
+  }, [isRunning]); // Rerun if isRunning changes to have correct state in closure
+
 
   const initializeEngine = useCallback(async () => {
     try {
-      addDiagnostic('Starting bot engine initialization...', 'info');
-      
       const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
       const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
 
       if (!rpcUrl || !privateKey) {
-        addDiagnostic('Missing environment variables', 'error');
         throw new Error("Missing VITE_POLYGON_RPC_URL or VITE_WALLET_PRIVATE_KEY in environment variables.");
       }
 
-      addDiagnostic('Creating Web3 provider...', 'info');
       providerRef.current = new ethers.JsonRpcProvider(rpcUrl);
       walletRef.current = new ethers.Wallet(privateKey, providerRef.current);
       const address = await walletRef.current.getAddress();
       setWalletAddress(address);
       
-      addDiagnostic(`Wallet connected: ${address.substring(0, 10)}...`, 'success');
-      
       nativeUsdcContractRef.current = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       
-      addDiagnostic('Smart contracts initialized', 'success');
       setIsLive(true);
       return true;
     } catch (error) {
-      addDiagnostic(`Initialization failed: ${error.message}`, 'error');
       console.error("LIVE INITIALIZATION FAILED:", error.message);
       setIsLive(false);
       return false;
@@ -110,13 +131,9 @@ export default function BotPage() {
   }, []);
 
   const fetchRealBalances = useCallback(async () => {
-    if (!walletRef.current) {
-      addDiagnostic('No wallet available for balance fetch', 'warning');
-      return { totalUsdc: 0 };
-    }
+    if (!walletRef.current) return { totalUsdc: 0 };
     
     try {
-      addDiagnostic('Fetching wallet balances...', 'info');
       const address = await walletRef.current.getAddress();
       const [maticWei, nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
         providerRef.current.getBalance(address),
@@ -128,16 +145,14 @@ export default function BotPage() {
       
       const matic = parseFloat(ethers.formatEther(maticWei));
       const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
-      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals))); // Fix: Changed 'briddcUsdcWei' to 'bridgedUsdcWei'
+      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
       setBridgedUsdcBalance(bridgedUsdc);
       
-      addDiagnostic(`Balances updated: ${(nativeUsdc + bridgedUsdc).toFixed(2)} USDC, ${matic.toFixed(2)} MATIC`, 'success');
       return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
-      addDiagnostic(`Balance fetch error: ${error.message}`, 'error');
       console.error("Error fetching balances:", error);
       return { totalUsdc: 0 };
     }
@@ -145,7 +160,7 @@ export default function BotPage() {
 
   const loadHistoricalExecutions = useCallback(async () => {
     try {
-      const historicalExecutions = await base44.entities.BotExecution.list({ sort: '-created_date', limit: 100 });
+      const historicalExecutions = await BotExecution.list({ sort: '-created_date', limit: 100 });
       setExecutions(historicalExecutions);
     } catch (error) {
       console.error("Could not load historical executions:", error);
@@ -154,9 +169,7 @@ export default function BotPage() {
 
   const scanForOpportunities = useCallback(async () => {
     try {
-      addDiagnostic('Scanning for opportunities...', 'info');
-      
-      const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
+      const opportunities = await ArbitrageOpportunity.list({ 
         filter: { status: 'active' },
         sort: '-profit_percentage',
         limit: 10 
@@ -168,112 +181,88 @@ export default function BotPage() {
         return opp.profit_percentage >= minProfit;
       });
       
-      addDiagnostic(`Found ${filteredOpps.length} profitable opportunities (${opportunities.length} total)`, 'info');
-      setDiagnostics(prev => ({ ...prev, lastScan: new Date() }));
-      
       return filteredOpps;
     } catch (error) {
-      addDiagnostic(`Scan error: ${error.message}`, 'error');
       console.error("Error scanning for opportunities:", error);
       return [];
     }
   }, [botConfig]);
 
+  const recordExecution = async (executionData) => {
+    const finalExecution = {
+      ...executionData,
+      id: 'temp-' + Date.now(),
+      created_date: new Date().toISOString()
+    };
+    setExecutions(prev => [finalExecution, ...prev].slice(0, 50));
+    try {
+      await BotExecution.create(executionData);
+    } catch(err) {
+      console.error("Failed to save execution record:", err);
+    }
+  };
+
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
-    console.log(`🚀 EXECUTING FLASHLOAN: $${config.amount.toLocaleString()} at ${opportunity.profit_percentage.toFixed(2)}% profit`);
-    
-    // Calculate potential profits
     const grossProfit = config.amount * (opportunity.profit_percentage / 100);
     const loanFee = config.amount * (config.fee_percentage / 100);
     const netProfit = grossProfit - loanFee;
 
-    // Update simulation result for UI
     setLastFlashloanSim({ grossProfit, loanFee, netProfit });
 
-    if (netProfit <= 0) {
-      addDiagnostic(`Flashloan unprofitable for opp ${opportunity.id}. Net: ${netProfit.toFixed(2)}`, 'warning');
-      console.log(`❌ Flashloan unprofitable for opp ${opportunity.id}. Net: ${netProfit.toFixed(2)}`);
-      return;
-    }
-    addDiagnostic(`Attempting flashloan for ${opportunity.pair} with net profit ${netProfit.toFixed(2)}`, 'info');
-
-    // Mark opportunity as traded
+    if (netProfit <= 0) return;
+    
     tradedOpportunityIdsRef.current.add(opportunity.id);
-    base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
+    await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    // Simulate execution (90% success rate)
     const status = Math.random() > 0.1 ? 'completed' : 'failed';
     const profitRealized = status === 'completed' ? netProfit * (0.9 + Math.random() * 0.1) : -loanFee;
 
-    const newExecution = {
+    recordExecution({
       execution_type: 'flashloan_trade',
       status: status,
       profit_realized: profitRealized,
       details: {
         opportunity: {
-          pair: opportunity.pair,
-          buyDex: opportunity.buy_exchange,
-          sellDex: opportunity.sell_exchange,
-          profitPercentage: opportunity.profit_percentage,
-          netProfitUsd: profitRealized,
+          pair: opportunity.pair, buyDex: opportunity.buy_exchange, sellDex: opportunity.sell_exchange,
+          profitPercentage: opportunity.profit_percentage, netProfitUsd: profitRealized,
         },
-        loanAmount: config.amount,
-        loanFee: loanFee,
-        provider: config.provider,
+        loanAmount: config.amount, loanFee: loanFee, provider: config.provider,
         tx_hash: '0xFLASH_' + ethers.hexlify(ethers.randomBytes(26)).substring(2)
       }
-    };
+    });
 
-    // Update UI immediately
-    setExecutions(prev => [{ ...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
-    
-    // Save to database
-    base44.entities.BotExecution.create(newExecution).catch(err => console.error(err));
-
-    // Update daily stats
     setDailyStats(prev => ({
       ...prev,
       trades: prev.trades + 1,
       profit: prev.profit + (status === 'completed' ? profitRealized : 0),
       loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
     }));
-
-    addDiagnostic(`Flashloan ${status} for ${opportunity.pair}: ${status === 'completed' ? '+' : ''}$${profitRealized.toFixed(2)}`, status === 'completed' ? 'success' : 'error');
-    console.log(`✅ FLASHLOAN ${status.toUpperCase()}: ${status === 'completed' ? '+' : ''}$${profitRealized.toFixed(2)}`);
-  }, []);
+  }, [recordExecution]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
-    addDiagnostic(`Attempting regular arbitrage for ${opportunity.pair}`, 'info');
-
     tradedOpportunityIdsRef.current.add(opportunity.id);
-    base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
+    await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    const success = Math.random() > 0.15;
+    const success = Math.random() > 0.15; // 85% success rate for simulation
     const status = success ? 'completed' : 'failed';
     const actualProfit = success
       ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
       : -(opportunity.estimated_profit * 0.5 || 1);
     const gasUsed = (opportunity.gas_estimate || 0.5);
 
-    const newExecution = {
+    recordExecution({
       execution_type: 'trade',
       status: status,
       profit_realized: actualProfit,
       gas_used: gasUsed,
       details: { 
         opportunity: {
-          pair: opportunity.pair,
-          buyDex: opportunity.buy_exchange,
-          sellDex: opportunity.sell_exchange,
-          profitPercentage: opportunity.profit_percentage,
-          netProfitUsd: actualProfit,
+          pair: opportunity.pair, buyDex: opportunity.buy_exchange, sellDex: opportunity.sell_exchange,
+          profitPercentage: opportunity.profit_percentage, netProfitUsd: actualProfit,
         },
         tx_hash: '0xREG_' + ethers.hexlify(ethers.randomBytes(30)).substring(2)
       }
-    };
-    
-    setExecutions(prev => [{...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
-    base44.entities.BotExecution.create(newExecution).catch(err => console.error(err));
+    });
     
     setDailyStats(prev => ({
       ...prev,
@@ -282,21 +271,14 @@ export default function BotPage() {
       loss: prev.loss + (success ? 0 : Math.abs(actualProfit)),
       gasUsed: prev.gasUsed + gasUsed
     }));
-
-    addDiagnostic(`Arbitrage ${status} for ${opportunity.pair}: ${status === 'completed' ? '+' : ''}$${actualProfit.toFixed(2)}`, status === 'completed' ? 'success' : 'error');
-  }, []);
+  }, [recordExecution]);
 
   const runTradingLoop = useCallback(async () => {
     try {
-      addDiagnostic('=== TRADING LOOP START ===', 'info');
-      
       const { totalUsdc } = await fetchRealBalances();
       const opps = await scanForOpportunities();
       
-      // Log scan results
-      setExecutions(prev => [{ 
-        id: Date.now(), 
-        created_date: new Date().toISOString(), 
+      recordExecution({ 
         execution_type: 'scan', 
         status: 'completed', 
         details: { 
@@ -304,88 +286,70 @@ export default function BotPage() {
           total_traded_this_session: tradedOpportunityIdsRef.current.size,
           flashloan_enabled: flashloanConfig?.enabled || false
         }
-      }, ...prev].slice(0, 50));
+      });
       
       if (opps.length > 0) {
         const topOpp = opps[0];
-        addDiagnostic(`Processing top opportunity: ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%`, 'info');
         
-        // PRIORITIZE FLASHLOAN if configured and profitable
         if (flashloanConfig && flashloanConfig.enabled) {
           const potentialGrossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
           const potentialLoanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
           const potentialNetProfit = potentialGrossProfit - potentialLoanFee;
           
-          if (potentialNetProfit > 5) { // Must be at least $5 profit to justify flashloan
-            addDiagnostic(`Executing flashloan trade: $${flashloanConfig.amount.toLocaleString()}`, 'info');
+          if (potentialNetProfit > 5) {
             await executeFlashloanArbitrage(topOpp, flashloanConfig);
-            addDiagnostic('=== TRADING LOOP END (Flashloan executed) ===', 'info');
-            return; // Exit after flashloan attempt
+            return;
+          } else {
+             recordExecution({
+                execution_type: 'alert',
+                status: 'completed',
+                details: {
+                    alert_type: "Flashloan Skipped",
+                    message: `Opportunity ${topOpp.pair} (${topOpp.profit_percentage.toFixed(2)}%) found, but net profit $${potentialNetProfit.toFixed(2)} was below $5 threshold.`
+                }
+             });
           }
         }
         
-        // Fallback to regular trade if flashloan not viable
         if (totalUsdc >= botConfig.max_position_size) {
-          addDiagnostic('Executing regular arbitrage trade', 'info');
           await executeArbitrage(topOpp);
         } else {
-          addDiagnostic(`Insufficient balance: ${totalUsdc.toFixed(2)} < ${botConfig.max_position_size} for regular trade`, 'warning');
+          recordExecution({
+            execution_type: 'alert',
+            status: 'completed',
+            details: {
+                alert_type: "Trade Skipped",
+                message: `Insufficient balance: ${totalUsdc.toFixed(2)} < ${botConfig.max_position_size} for regular trade.`
+            }
+          });
         }
-      } else {
-        addDiagnostic('No profitable opportunities found this cycle', 'info');
       }
-      
-      addDiagnostic('=== TRADING LOOP END ===', 'info');
     } catch (error) {
-      addDiagnostic(`Trading loop error: ${error.message}`, 'error');
       console.error("Trading loop error:", error);
+      recordExecution({
+        execution_type: 'error',
+        status: 'failed',
+        error_message: error.message
+      });
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig]);
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig, recordExecution]);
 
   const handleToggleBot = async () => {
     if (isRunning) {
-      addDiagnostic('Stopping bot...', 'info');
       setIsRunning(false);
       setIsLive(false);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        addDiagnostic('Trading loop stopped', 'success');
-      }
+      workerRef.current.postMessage({ action: 'stop' });
       setWalletAddress(null);
     } else {
-      addDiagnostic('Starting bot...', 'info');
       tradedOpportunityIdsRef.current = new Set();
       setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
       
       const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
-        addDiagnostic('Running first trading cycle...', 'info');
-        
-        // Run first cycle immediately with a slight delay
-        setTimeout(async () => {
-          try {
-            await runTradingLoop();
-            addDiagnostic('First cycle completed, starting interval...', 'success');
-          } catch (error) {
-            addDiagnostic(`First cycle error: ${error.message}`, 'error');
-          }
-        }, 1000); // 1 second delay for first run
-
-        // Set up interval for subsequent cycles
-        intervalRef.current = setInterval(() => {
-          try {
-            addDiagnostic('Interval trigger - starting new cycle', 'info');
-            runTradingLoop();
-          } catch (error) {
-            addDiagnostic(`Interval error: ${error.message}`, 'error');
-          }
-        }, 15000); // 15 seconds
-        
-        addDiagnostic('Bot started successfully with 15-second intervals', 'success');
+        // Start the background worker
+        workerRef.current.postMessage({ action: 'start', interval: 15000 });
       } else {
-        addDiagnostic('Bot startup failed - check environment variables', 'error');
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
     }
@@ -393,9 +357,6 @@ export default function BotPage() {
 
   useEffect(() => {
     loadHistoricalExecutions();
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
   }, [loadHistoricalExecutions]);
 
   const getStatusColor = () => isRunning ? 'bg-emerald-500' : 'bg-slate-500';
@@ -433,58 +394,13 @@ export default function BotPage() {
             {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
           </Button>
         </div>
-
-        {!isRunning ? (
-          <Alert className="mb-6 border-amber-200 bg-amber-50">
-            <AlertTriangle className="w-4 h-4" />
-            <AlertDescription className="text-amber-800">
-              <strong>Bot Offline:</strong> Click Start to connect your wallet and begin analysis.
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <Alert className="mb-6 border-purple-200 bg-purple-50">
-            <Zap className="w-4 h-4 text-purple-700" />
-            <AlertDescription className="text-purple-800">
-              <strong>Flashloan Mode Active:</strong> Bot will attempt flashloan trades with ${flashloanConfig?.amount.toLocaleString() || '25,000'} 
-              when opportunities exceed profit thresholds. Wallet <code className="text-xs">{walletAddress}</code> connected.
-              <strong> All transactions are simulated</strong> - no real funds at risk during testing.
-            </AlertDescription>
-          </Alert>
-        )}
         
-        {isRunning && (
-          <div className="mb-6">
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6">
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">🔧 Diagnostics</h3>
-              <div className="grid md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <span className="text-sm text-slate-600">Last Scan:</span>
-                  <div className="font-medium">{diagnostics.lastScan ? diagnostics.lastScan.toLocaleTimeString() : 'Never'}</div>
-                </div>
-                <div>
-                  <span className="text-sm text-slate-600">Bot Status:</span>
-                  <div className={`font-medium ${isRunning ? 'text-green-600' : 'text-red-600'}`}>
-                    {isRunning ? 'Active & Scanning' : 'Stopped'}
-                  </div>
-                </div>
-              </div>
-              <div className="max-h-32 overflow-y-auto bg-slate-50 rounded p-3">
-                <div className="text-xs space-y-1">
-                  {diagnostics.errors.map((error, index) => (
-                    <div key={index} className={`${
-                      error.type === 'error' ? 'text-red-600' :
-                      error.type === 'warning' ? 'text-amber-600' :
-                      error.type === 'success' ? 'text-green-600' :
-                      'text-slate-600'
-                    }`}>
-                      [{error.timestamp}] {error.message}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <Alert className="mb-6 border-blue-200 bg-blue-50">
+          <Bot className="w-4 h-4" />
+          <AlertDescription className="text-blue-800">
+            <strong>Bot Runs in Background:</strong> The trading logic now runs in a background thread, so it will continue to execute even if this tab is not active.
+          </AlertDescription>
+        </Alert>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Trades Today</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
