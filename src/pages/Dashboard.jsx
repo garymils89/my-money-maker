@@ -21,7 +21,7 @@ const USDC_ABI = ["function balanceOf(address owner) view returns (uint256)", "f
 export default function Dashboard() {
   const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = new Date());
+  const [lastUpdated, setLastUpdated] = useState(new Date());
   const [walletBalance, setWalletBalance] = useState(0);
 
   useEffect(() => {
