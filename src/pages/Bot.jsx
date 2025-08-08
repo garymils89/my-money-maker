@@ -219,7 +219,11 @@ export default function BotPage() {
     stop_loss_percentage: 5
   });
   const [executions, setExecutions] = useState([]);
-  const [walletInfo, setWalletInfo] = useState({ maticBalance: 0, usdcBalance: 0 });
+  
+  // REFACTORED STATE: Using separate states for clarity and to ensure re-renders.
+  const [usdcBalance, setUsdcBalance] = useState(0);
+  const [maticBalance, setMaticBalance] = useState(0);
+  
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
   const engineRef = useRef(null);
@@ -247,8 +251,11 @@ export default function BotPage() {
     try {
       const liveEngine = engineRef.current;
       const opps = await liveEngine.scanForRealOpportunities();
-      const currentBalances = await liveEngine.fetchRealBalances(); // Fetch real balances in each loop
-      setWalletInfo(currentBalances);
+      
+      // Fetch and set balances using new state setters
+      const currentBalances = await liveEngine.fetchRealBalances();
+      setUsdcBalance(currentBalances.usdcBalance);
+      setMaticBalance(currentBalances.maticBalance);
 
       const scanExecution = {
         id: Date.now(),
@@ -268,8 +275,8 @@ export default function BotPage() {
       if (
         liveEngine.canTradeLive() &&
         opps.length > 0 &&
-        opps[0].profit_percentage >= minProfit && // Use profit_percentage from DB
-        currentBalances.usdcBalance >= positionSize
+        opps[0].profit_percentage >= minProfit &&
+        currentBalances.usdcBalance >= positionSize // Use live balance for check
       ) {
         console.log('💎 Executing top opportunity:', opps[0]);
 
@@ -305,7 +312,9 @@ export default function BotPage() {
 
       if (engine.canTradeLive()) {
         setIsLive(true);
-        setWalletInfo(initialBalances);
+        // Set initial balances using new state setters
+        setUsdcBalance(initialBalances.usdcBalance);
+        setMaticBalance(initialBalances.maticBalance);
         setWalletAddress(engine.walletAddress);
         setIsRunning(true);
         intervalRef.current = setInterval(runTradingLoop, 60000);
@@ -324,6 +333,8 @@ export default function BotPage() {
       }
       setIsLive(false); // Bot is stopped, so it's not live
       setWalletAddress(null); // Clear wallet address
+      setUsdcBalance(0); // Clear balances on stop
+      setMaticBalance(0); // Clear balances on stop
     }
   };
 
@@ -423,24 +434,26 @@ export default function BotPage() {
             </CardContent>
           </Card>
 
+          {/* UPDATED: Changed to MATIC Balance */}
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600">Gas Used</p>
-                  <h3 className="text-2xl font-bold text-purple-600">{dailyStats.gasUsed.toFixed(2)} MATIC</h3>
+                  <p className="text-sm text-slate-600">MATIC Balance</p>
+                  <h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3>
                 </div>
                 <Zap className="w-8 h-8 text-purple-500" />
               </div>
             </CardContent>
           </Card>
 
+          {/* UPDATED: Wired to new usdcBalance state */}
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">USDC Balance</p>
-                  <h3 className="text-2xl font-bold text-orange-600">${walletInfo.usdcBalance.toLocaleString()}</h3>
+                  <h3 className="text-2xl font-bold text-orange-600">${usdcBalance.toLocaleString()}</h3>
                 </div>
                 <Zap className="w-8 h-8 text-orange-500" />
               </div>
@@ -491,3 +504,4 @@ export default function BotPage() {
     </div>
   );
 }
+
