@@ -1,0 +1,57 @@
+{
+  "name": "BotExecution",
+  "type": "object",
+  "properties": {
+    "bot_config_id": {
+      "type": "string",
+      "description": "ID of the bot configuration"
+    },
+    "opportunity_id": {
+      "type": "string",
+      "description": "ID of the arbitrage opportunity"
+    },
+    "execution_type": {
+      "type": "string",
+      "enum": [
+        "scan",
+        "trade",
+        "error",
+        "alert",
+        "flashloan_trade"
+      ],
+      "description": "Type of execution"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "executing",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "description": "Execution status"
+    },
+    "details": {
+      "type": "object",
+      "description": "Execution details and logs"
+    },
+    "profit_realized": {
+      "type": "number",
+      "description": "Actual profit from trade"
+    },
+    "gas_used": {
+      "type": "number",
+      "description": "Gas used in MATIC"
+    },
+    "execution_time_ms": {
+      "type": "number",
+      "description": "Execution time in milliseconds"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error message if failed"
+    }
+  },
+  "required": []
+}

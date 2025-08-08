@@ -1,0 +1,67 @@
+{
+  "name": "Trade",
+  "type": "object",
+  "properties": {
+    "opportunity_id": {
+      "type": "string",
+      "description": "Related arbitrage opportunity ID"
+    },
+    "trade_type": {
+      "type": "string",
+      "enum": [
+        "arbitrage",
+        "spot",
+        "liquidity"
+      ],
+      "description": "Type of trade"
+    },
+    "buy_exchange": {
+      "type": "string",
+      "description": "Exchange bought from"
+    },
+    "sell_exchange": {
+      "type": "string",
+      "description": "Exchange sold to"
+    },
+    "asset_pair": {
+      "type": "string",
+      "description": "Trading pair"
+    },
+    "amount": {
+      "type": "number",
+      "description": "Trade amount"
+    },
+    "buy_price": {
+      "type": "number",
+      "description": "Purchase price"
+    },
+    "sell_price": {
+      "type": "number",
+      "description": "Sale price"
+    },
+    "profit": {
+      "type": "number",
+      "description": "Realized profit"
+    },
+    "fees": {
+      "type": "number",
+      "description": "Total fees paid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "default": "pending"
+    },
+    "execution_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When trade was executed"
+    }
+  },
+  "required": []
+}

@@ -51,6 +51,9 @@ export default function BotPage() {
     max_slippage_percentage: 0.5,
     stop_loss_percentage: 5
   });
+
+  const [flashloanConfig, setFlashloanConfig] = useState(null);
+  const [lastFlashloanSim, setLastFlashloanSim] = useState(null);
   
   const [executions, setExecutions] = useState([]);
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
@@ -144,7 +147,53 @@ export default function BotPage() {
       return [];
     }
   }, [botConfig]);
-  
+
+  const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
+    const grossProfit = config.amount * (opportunity.profit_percentage / 100);
+    const loanFee = config.amount * (config.fee_percentage / 100);
+    const netProfit = grossProfit - loanFee;
+
+    setLastFlashloanSim({ grossProfit, loanFee, netProfit });
+
+    if (netProfit <= 0) {
+      console.log(`Flashloan unprofitable for opp ${opportunity.id}. Net: ${netProfit.toFixed(2)}`);
+      return;
+    }
+
+    tradedOpportunityIdsRef.current.add(opportunity.id);
+    base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
+
+    const status = Math.random() > 0.1 ? 'completed' : 'failed'; // 90% success rate
+    const profitRealized = status === 'completed' ? netProfit * (0.9 + Math.random() * 0.1) : -loanFee; // simulate some variance
+
+    const newExecution = {
+      execution_type: 'flashloan_trade',
+      status: status,
+      profit_realized: profitRealized,
+      details: {
+        opportunity: {
+          pair: opportunity.pair,
+          buyDex: opportunity.buy_exchange,
+          sellDex: opportunity.sell_exchange,
+          profitPercentage: opportunity.profit_percentage,
+        },
+        loanAmount: config.amount,
+        loanFee: loanFee,
+        tx_hash: '0xSIMULATED_FLASHLOAN_' + ethers.hexlify(ethers.randomBytes(26)).substring(2)
+      }
+    };
+
+    setExecutions(prev => [{ ...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
+    base44.entities.BotExecution.create(newExecution).catch(err => console.error(err));
+
+    setDailyStats(prev => ({
+      ...prev,
+      trades: prev.trades + 1,
+      profit: prev.profit + (status === 'completed' ? profitRealized : 0),
+      loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
+    }));
+  }, []);
+
   const executeArbitrage = useCallback(async (opportunity) => {
     // CORE FIX: Add the new ID to the ref immediately.
     tradedOpportunityIdsRef.current.add(opportunity.id);
@@ -201,10 +250,24 @@ export default function BotPage() {
       details: { found: opps.length, total_traded_this_session: tradedOpportunityIdsRef.current.size }
     }, ...prev].slice(0, 50));
     
-    if (opps.length > 0 && totalUsdc >= botConfig.max_position_size) {
-      await executeArbitrage(opps[0]);
+    if (opps.length > 0) {
+      const topOpp = opps[0];
+      // Prefer flashloan if configured and profitable
+      if (flashloanConfig && flashloanConfig.enabled) {
+        const potentialGrossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
+        const potentialLoanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
+        if (potentialGrossProfit > potentialLoanFee) {
+          await executeFlashloanArbitrage(topOpp, flashloanConfig);
+          return; // End loop after flashloan attempt
+        }
+      }
+      
+      // Fallback to regular trade if flashloan is not viable or profitable
+      if (totalUsdc >= botConfig.max_position_size) {
+        await executeArbitrage(topOpp);
+      }
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, botConfig]);
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig]);
 
   const handleToggleBot = async () => {
     if (isRunning) {
@@ -320,7 +383,7 @@ export default function BotPage() {
           <TabsContent value="dashboard"><BotExecutionLog executions={executions} /></TabsContent>
           <TabsContent value="config"><BotConfigForm config={botConfig} onSubmit={setBotConfig} /></TabsContent>
           <TabsContent value="risk"><RiskControls config={botConfig} dailyStats={dailyStats} onUpdateConfig={setBotConfig} /></TabsContent>
-          <TabsContent value="leverage"><LeverageManager /></TabsContent>
+          <TabsContent value="leverage"><LeverageManager onConfigChange={setFlashloanConfig} simulationResult={lastFlashloanSim} /></TabsContent>
         </Tabs>
       </div>
     </div>

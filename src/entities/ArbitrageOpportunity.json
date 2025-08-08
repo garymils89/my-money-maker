@@ -1,0 +1,57 @@
+{
+  "name": "ArbitrageOpportunity",
+  "type": "object",
+  "properties": {
+    "pair": {
+      "type": "string",
+      "description": "Trading pair (e.g., USDC/USDT)"
+    },
+    "buy_exchange": {
+      "type": "string",
+      "description": "Exchange to buy from"
+    },
+    "sell_exchange": {
+      "type": "string",
+      "description": "Exchange to sell to"
+    },
+    "buy_price": {
+      "type": "number",
+      "description": "Buy price"
+    },
+    "sell_price": {
+      "type": "number",
+      "description": "Sell price"
+    },
+    "profit_percentage": {
+      "type": "number",
+      "description": "Profit percentage"
+    },
+    "volume_available": {
+      "type": "number",
+      "description": "Available volume"
+    },
+    "estimated_profit": {
+      "type": "number",
+      "description": "Estimated profit in USD"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Risk assessment"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "executed",
+        "expired"
+      ],
+      "default": "active"
+    }
+  },
+  "required": []
+}

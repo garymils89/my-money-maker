@@ -1,0 +1,52 @@
+{
+  "name": "DexPool",
+  "type": "object",
+  "properties": {
+    "dex_name": {
+      "type": "string",
+      "description": "Name of the DEX (Uniswap, Curve, etc.)"
+    },
+    "pool_address": {
+      "type": "string",
+      "description": "Smart contract address of the pool"
+    },
+    "token_a": {
+      "type": "string",
+      "description": "First token symbol"
+    },
+    "token_b": {
+      "type": "string",
+      "description": "Second token symbol"
+    },
+    "token_a_address": {
+      "type": "string",
+      "description": "Token A contract address"
+    },
+    "token_b_address": {
+      "type": "string",
+      "description": "Token B contract address"
+    },
+    "fee_tier": {
+      "type": "number",
+      "description": "Pool fee tier (e.g., 0.3 for 0.3%)"
+    },
+    "current_liquidity": {
+      "type": "number",
+      "description": "Current pool liquidity in USD"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to monitor this pool"
+    },
+    "min_trade_size": {
+      "type": "number",
+      "description": "Minimum trade size for this pool"
+    },
+    "max_trade_size": {
+      "type": "number",
+      "description": "Maximum trade size for this pool"
+    }
+  },
+  "required": []
+}

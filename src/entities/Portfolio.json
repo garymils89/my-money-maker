@@ -1,0 +1,39 @@
+{
+  "name": "Portfolio",
+  "type": "object",
+  "properties": {
+    "exchange": {
+      "type": "string",
+      "description": "Exchange name"
+    },
+    "asset": {
+      "type": "string",
+      "description": "Asset symbol (USDC, USDT, etc.)"
+    },
+    "balance": {
+      "type": "number",
+      "description": "Current balance"
+    },
+    "locked_balance": {
+      "type": "number",
+      "description": "Balance in active trades"
+    },
+    "average_buy_price": {
+      "type": "number",
+      "description": "Average purchase price"
+    },
+    "total_invested": {
+      "type": "number",
+      "description": "Total amount invested"
+    },
+    "current_value": {
+      "type": "number",
+      "description": "Current market value"
+    },
+    "profit_loss": {
+      "type": "number",
+      "description": "Unrealized P&L"
+    }
+  },
+  "required": []
+}

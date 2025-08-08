@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,8 @@ import {
   Search,
   ExternalLink,
   Filter,
-  Calendar
+  Calendar,
+  Zap // Added Zap icon for flashloans
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -24,6 +26,8 @@ export default function BotExecutionLog({ executions = [] }) {
     switch (type) {
       case 'trade':
         return <TrendingUp className="w-4 h-4 text-emerald-500" />;
+      case 'flashloan_trade': // New case for flashloan trade
+        return <Zap className="w-4 h-4 text-purple-500" />;
       case 'scan':
         return <Search className="w-4 h-4 text-blue-500" />;
       case 'alert':
@@ -64,10 +68,10 @@ export default function BotExecutionLog({ executions = [] }) {
       return 0;
     });
 
-  const totalTrades = executions.filter(e => e.execution_type === 'trade').length;
-  const successfulTrades = executions.filter(e => e.execution_type === 'trade' && e.status === 'completed').length;
+  const totalTrades = executions.filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade').length;
+  const successfulTrades = executions.filter(e => (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade') && e.status === 'completed').length;
   const totalProfit = executions
-    .filter(e => e.execution_type === 'trade' && e.status === 'completed')
+    .filter(e => (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade') && e.status === 'completed')
     .reduce((sum, e) => sum + (e.profit_realized || 0), 0);
 
   return (
@@ -143,7 +147,8 @@ export default function BotExecutionLog({ executions = [] }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Events</SelectItem>
-                <SelectItem value="trade">Trades Only</SelectItem>
+                <SelectItem value="trade">Regular Trades</SelectItem>
+                <SelectItem value="flashloan_trade">Flashloan Trades</SelectItem> {/* New filter item */}
                 <SelectItem value="scan">Scans Only</SelectItem>
                 <SelectItem value="alert">Alerts Only</SelectItem>
               </SelectContent>
@@ -173,7 +178,7 @@ export default function BotExecutionLog({ executions = [] }) {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-semibold text-slate-900 capitalize">
-                          {execution.execution_type}
+                          {execution.execution_type.replace('_', ' ')} {/* Replaced _ with space */}
                         </span>
                         <Badge className={getStatusColor(execution.status)}>
                           {execution.status}
@@ -192,7 +197,7 @@ export default function BotExecutionLog({ executions = [] }) {
                       {/* Execution Details */}
                       {execution.details && (
                         <div className="text-sm">
-                          {execution.execution_type === 'trade' && execution.details.opportunity && (
+                          {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.details.opportunity && (
                             <div className="space-y-1">
                               <div>
                                 <span className="font-medium">Pair:</span> {execution.details.opportunity.pair}
@@ -207,6 +212,11 @@ export default function BotExecutionLog({ executions = [] }) {
                                   (${execution.details.opportunity.netProfitUsd?.toFixed(2)})
                                 </span>
                               </div>
+                              {execution.details.loanAmount && ( // Display loan amount if present
+                                <div>
+                                    <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
+                                </div>
+                              )}
                             </div>
                           )}
                           
@@ -241,7 +251,7 @@ export default function BotExecutionLog({ executions = [] }) {
                     </div>
                   </div>
 
-                  {execution.execution_type === 'trade' && execution.status === 'completed' && (
+                  {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.status === 'completed' && (
                     <Button 
                       variant="ghost" 
                       size="sm"
