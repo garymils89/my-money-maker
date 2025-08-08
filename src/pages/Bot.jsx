@@ -166,8 +166,16 @@ export default function BotPage() {
     await fetchRealBalances();
     const opps = await scanForOpportunities();
     
+    console.log(`Found ${opps.length} opportunities`);
+    
     // FIXED: Added 'created_date' to the scan log object to fix "Invalid Date" issue.
-    setExecutions(prev => [{ id: Date.now(), created_date: new Date().toISOString(), execution_type: 'scan', status: 'completed', details: {found: opps.length}}, ...prev].slice(0, 50));
+    setExecutions(prev => [{ 
+      id: Date.now(), 
+      created_date: new Date().toISOString(), 
+      execution_type: 'scan', 
+      status: 'completed', 
+      details: { found: opps.length }
+    }, ...prev].slice(0, 50));
     
     // UPDATED: Use total USDC balance for trade check
     const totalUsdc = nativeUsdcBalance + bridgedUsdcBalance;
@@ -176,23 +184,37 @@ export default function BotPage() {
       await executeArbitrage(opps[0]);
       await loadInitialData(); // Reload log to show new trade
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig]);
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig, loadInitialData]);
 
   // --- Control Functions ---
 
   const handleToggleBot = async () => {
     if (isRunning) {
+      console.log("🛑 Stopping bot...");
       setIsRunning(false);
       setIsLive(false);
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       setWalletAddress(null);
     } else {
+      console.log("🚀 Starting bot...");
       const success = await initializeEngine(botConfig);
       if (success) {
         setIsRunning(true);
         await fetchRealBalances();
-        runTradingLoop(); // Run once immediately
-        intervalRef.current = setInterval(runTradingLoop, 60000);
+        
+        // Run immediately
+        runTradingLoop();
+        
+        // FIXED: Set up interval to run every 15 seconds (more frequent for demo)
+        intervalRef.current = setInterval(() => {
+          console.log("⏰ Running scheduled scan...");
+          runTradingLoop();
+        }, 15000);
+        
+        console.log("✅ Bot started - scanning every 15 seconds");
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
