@@ -134,10 +134,10 @@ export default function BotPage() {
     const gasUsed = (opportunity.gas_estimate || 0.5);
 
     console.log(`✅ SIMULATING TRADE: ${opportunity.pair} | Status: ${status} | P&L: $${actualProfit.toFixed(2)}`);
-    console.log(`🔄 MARKING OPPORTUNITY ${opportunity.id} AS EXECUTED...`);
 
     // CRITICAL FIX: Mark opportunity as executed IMMEDIATELY and await it
     try {
+      console.log(`🔄 MARKING OPPORTUNITY ${opportunity.id} AS EXECUTED...`);
       await base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' });
       console.log(`✅ OPPORTUNITY ${opportunity.id} MARKED AS EXECUTED SUCCESSFULLY`);
     } catch (error) {
@@ -302,18 +302,19 @@ export default function BotPage() {
           </Button>
         </div>
 
-        {!isLive ? (
+        {/* FIXED: Clearer UI messaging about the bot's status */}
+        {!isRunning ? (
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertTriangle className="w-4 h-4" />
             <AlertDescription className="text-amber-800">
-              <strong>Bot Offline:</strong> Bot is in "Live Simulation" mode. Click Start to connect to your wallet and begin simulating trades with live data.
+              <strong>Bot Stopped:</strong> The bot is currently offline. Click Start to connect to your wallet.
             </AlertDescription>
           </Alert>
         ) : (
           <Alert className="mb-6 border-emerald-200 bg-emerald-50">
-            <ShieldCheck className="w-4 h-4 text-emerald-700" />
+            <ShieldCheck className="w-4 h-4" />
             <AlertDescription className="text-emerald-800">
-              <strong>Live & Connected:</strong> Wallet: <code className="text-xs">{walletAddress}</code>. Simulating trades with live market data.
+              <strong>Bot Active (Live Simulation):</strong> Connected to wallet <code className="text-xs">{walletAddress}</code>. Using live market data to <strong>simulate</strong> trades. No real funds are being spent.
             </AlertDescription>
           </Alert>
         )}
