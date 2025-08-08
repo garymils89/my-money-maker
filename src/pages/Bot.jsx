@@ -22,6 +22,8 @@ import RiskControls from "../components/bot/RiskControls";
 import BotExecutionLog from "../components/bot/BotExecutionLog";
 import LeverageManager from "../components/bot/LeverageManager";
 import LiveActivityFeed from "../components/bot/LiveActivityFeed";
+import RealTradeExecutor from "../components/bot/RealTradeExecutor"; // New import
+import { tradingSafety } from "../components/bot/TradingSafetyLayer"; // New import for safety controls
 
 import { BotExecution } from "@/api/entities";
 import { ArbitrageOpportunity } from "@/api/entities";
@@ -56,9 +58,10 @@ export default function BotPage() {
     stop_loss_percentage: 5
   });
 
+  // FIX: Initialize flashloanConfig directly from the safety layer to prevent race condition.
   const [flashloanConfig, setFlashloanConfig] = useState({
     enabled: true,
-    amount: 25000,
+    amount: tradingSafety.getConfig().maxFlashloanAmount,
     provider: 'aave',
     fee_percentage: 0.09
   });
@@ -69,6 +72,9 @@ export default function BotPage() {
   
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
+  const [realTradingEnabled, setRealTradingEnabled] = useState(false); // New state
+  const [tradeExecutor, setTradeExecutor] = useState(null); // New state
+
   const providerRef = useRef(null);
   const walletRef = useRef(null);
   const nativeUsdcContractRef = useRef(null);
@@ -77,15 +83,12 @@ export default function BotPage() {
 
   // Subscribe to the central state on mount, unsubscribe on unmount
   useEffect(() => {
-    const unsubscribe = botStateManager.subscribe(setExecutions);
-    
-    // Load existing daily stats immediately when component mounts
-    const existingStats = botStateManager.getDailyStats();
-    if (existingStats) {
-      setDailyStats(existingStats);
-      console.log(`📊 BOT: Loaded existing daily stats: ${existingStats.trades} trades`);
-    }
-    
+    const unsubscribe = botStateManager.subscribe(state => {
+      setExecutions(state.executions);
+      if (state.dailyStats) {
+        setDailyStats(state.dailyStats);
+      }
+    });
     return unsubscribe;
   }, []);
 
@@ -120,8 +123,7 @@ export default function BotPage() {
         gasUsed
       };
       
-      // Update both local state AND central state
-      setDailyStats(newStats);
+      // Update central state
       botStateManager.setDailyStats(newStats);
       
       console.log(`📊 Daily stats updated: ${todayTrades.length} trades, $${profit.toFixed(2)} profit`);
@@ -150,7 +152,25 @@ export default function BotPage() {
       nativeUsdcContractRef.current = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       
-      console.log("✅ BOT: Engine initialized successfully");
+      // Initialize real trade executor
+      const executor = new RealTradeExecutor(providerRef.current, walletRef.current);
+      setTradeExecutor(executor);
+      
+      // Validate wallet can actually trade
+      const balanceCheck = await executor.validateWalletBalance();
+      if (!balanceCheck.canTrade) {
+        console.warn("⚠️ Wallet balance too low for real trading:", balanceCheck);
+        await recordExecution({
+          execution_type: 'alert',
+          status: 'completed',
+          details: {
+            alert_type: 'Warning',
+            message: `Low balance detected: ${balanceCheck.maticBalance.toFixed(4)} MATIC, $${balanceCheck.usdcBalance.toFixed(2)} USDC`
+          }
+        });
+      }
+      
+      console.log("✅ BOT: Engine initialized successfully with real trading capability");
       setIsLive(true);
       return true;
     } catch (error) {
@@ -158,7 +178,7 @@ export default function BotPage() {
       setIsLive(false);
       return false;
     }
-  }, []);
+  }, [recordExecution]);
 
   const fetchRealBalances = useCallback(async () => {
     if (!walletRef.current) return { totalUsdc: 0 };
@@ -179,9 +199,12 @@ export default function BotPage() {
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
-      setBridgedUsdcBalance(bridgedUsdc); 
+      setBridgedUsdcBalance(bridgedUsdc);
       
-      return { totalUsdc: nativeUsdc + bridgedUsdc };
+      const totalUsdc = nativeUsdc + bridgedUsdc;
+      botStateManager.setWalletBalance(totalUsdc); // Update central state
+      
+      return { totalUsdc };
     } catch (error) {
       console.error("Error fetching balances:", error);
       return { totalUsdc: 0 };
@@ -190,7 +213,7 @@ export default function BotPage() {
 
   const loadHistoricalExecutions = useCallback(async () => {
     // Only load if the central state is empty
-    if (botStateManager.getExecutions().length === 0) {
+    if (botStateManager.getState().executions.length === 0) {
       try {
         const historicalData = await BotExecution.list('-created_date', 100);
         botStateManager.setAllExecutions(historicalData || []); // Use central state setter
@@ -200,14 +223,6 @@ export default function BotPage() {
       }
     }
     
-    // Load daily stats from botStateManager first (for instant display)
-    // NOTE: Initial load is now handled by the main useEffect, this is a fallback if this function is called independently.
-    const existingStats = botStateManager.getDailyStats();
-    if (existingStats) {
-      setDailyStats(existingStats);
-    }
-    
-    // Then refresh from database (to get latest data)
     await calculateDailyStatsFromDB();
   }, [calculateDailyStatsFromDB]);
 
@@ -251,89 +266,174 @@ export default function BotPage() {
   }, [calculateDailyStatsFromDB]);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
-    console.log(`⚡ FLASHLOAN TRADE: Executing ${opportunity.pair} with $${config.amount.toLocaleString()}`);
-    
-    const grossProfit = config.amount * (opportunity.profit_percentage / 100);
-    const loanFee = config.amount * (config.fee_percentage / 100);
-    const netProfit = grossProfit - loanFee;
+    // FIX: Add a redundant, hard-coded safety clamp here as a final guardrail.
+    const maxAllowedBySafetyLayer = tradingSafety.getConfig().maxFlashloanAmount;
+    const safeFlashloanAmount = Math.min(config.amount, maxAllowedBySafetyLayer);
 
-    setLastFlashloanSim({ grossProfit, loanFee, netProfit });
-    
-    tradedOpportunityIdsRef.current.add(opportunity.id);
+    if (safeFlashloanAmount < config.amount) {
+      const message = `Flashloan amount of $${config.amount.toLocaleString()} was reduced to environment limit of $${safeFlashloanAmount.toLocaleString()}.`;
+      console.warn(`🚨 SAFETY OVERRIDE: ${message}`);
+      await recordExecution({
+        execution_type: 'alert',
+        status: 'completed',
+        details: { alert_type: 'Safety Override', message }
+      });
+    }
 
-    const success = Math.random() > 0.1;
-    const status = success ? 'completed' : 'failed';
-    const profitRealized = status === 'completed' ? netProfit * (0.95 + Math.random() * 0.05) : -loanFee;
-    
-    // Generate realistic transaction hash for successful trades
-    const txHash = status === 'completed' 
-      ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
-      : null;
+    if (realTradingEnabled && tradeExecutor) {
+      // REAL FLASHLOAN EXECUTION
+      console.log(`⚡ REAL FLASHLOAN: Executing ${opportunity.pair} with $${safeFlashloanAmount.toLocaleString()}`);
+      
+      const result = await tradeExecutor.executeFlashloanArbitrage(opportunity, safeFlashloanAmount);
+      
+      tradedOpportunityIdsRef.current.add(opportunity.id);
 
-    await recordExecution({
-      execution_type: 'flashloan_trade',
-      status: status,
-      profit_realized: profitRealized,
-      details: {
-        opportunity: {
-          pair: opportunity.pair, 
-          buyDex: opportunity.buy_exchange, 
-          sellDex: opportunity.sell_exchange,
-          profitPercentage: opportunity.profit_percentage, 
-          netProfitUsd: profitRealized,
-        },
-        loanAmount: config.amount, 
-        loanFee: config.fee_percentage, 
-        provider: config.provider,
-        tx_hash: txHash
-      }
-    });
+      await recordExecution({
+        execution_type: 'flashloan_trade',
+        status: result.success ? 'completed' : 'failed',
+        profit_realized: result.netProfit,
+        gas_used: result.gasUsed,
+        details: {
+          opportunity: {
+            pair: opportunity.pair, 
+            buyDex: opportunity.buy_exchange, 
+            sellDex: opportunity.sell_exchange,
+            profitPercentage: opportunity.profit_percentage, 
+            netProfitUsd: result.netProfit,
+          },
+          loanAmount: safeFlashloanAmount, 
+          loanFee: result.fee || (safeFlashloanAmount * 0.0005), 
+          provider: config.provider,
+          tx_hash: result.txHash,
+          realExecution: true,
+          error: result.error
+        }
+      });
 
-    console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
-  }, [recordExecution]);
+      console.log(`💰 REAL FLASHLOAN ${result.success ? 'SUCCESS' : 'FAILED'}: ${result.netProfit > 0 ? '+' : ''}$${result.netProfit.toFixed(2)}${result.txHash ? ` | TX: ${result.txHash}` : ''}`);
+    } else {
+      // SIMULATION MODE
+      console.log(`⚡ FLASHLOAN SIMULATION: Executing ${opportunity.pair} with $${safeFlashloanAmount.toLocaleString()}`);
+      
+      const grossProfit = safeFlashloanAmount * (opportunity.profit_percentage / 100);
+      const loanFee = safeFlashloanAmount * (config.fee_percentage / 100);
+      const netProfit = grossProfit - loanFee;
+
+      setLastFlashloanSim({ grossProfit, loanFee, netProfit });
+      
+      tradedOpportunityIdsRef.current.add(opportunity.id);
+
+      const success = Math.random() > 0.1;
+      const status = success ? 'completed' : 'failed';
+      const profitRealized = status === 'completed' ? netProfit * (0.95 + Math.random() * 0.05) : -loanFee;
+      
+      // Generate realistic transaction hash for successful simulated trades
+      const txHash = status === 'completed' 
+        ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
+        : null;
+
+      await recordExecution({
+        execution_type: 'flashloan_trade',
+        status: status,
+        profit_realized: profitRealized,
+        details: {
+          opportunity: {
+            pair: opportunity.pair, 
+            buyDex: opportunity.buy_exchange, 
+            sellDex: opportunity.sell_exchange,
+            profitPercentage: opportunity.profit_percentage, 
+            netProfitUsd: profitRealized,
+          },
+          loanAmount: safeFlashloanAmount, 
+          loanFee: config.fee_percentage, 
+          provider: config.provider,
+          tx_hash: txHash,
+          realExecution: false // Mark as simulation
+        }
+      });
+
+      console.log(`💰 FLASHLOAN SIMULATION ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
+    }
+  }, [recordExecution, realTradingEnabled, tradeExecutor]);
 
   const executeArbitrage = useCallback(async (opportunity) => {
-    console.log(`📈 BOT: REGULAR - Executing ${opportunity.pair}`);
-    
-    tradedOpportunityIdsRef.current.add(opportunity.id);
-    await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
+    if (realTradingEnabled && tradeExecutor) {
+      // REAL ARBITRAGE EXECUTION
+      console.log(`📈 REAL ARBITRAGE: Executing ${opportunity.pair}`);
+      
+      const tradeAmount = Math.min(botConfig?.max_position_size || 100, opportunity.estimated_profit * 10);
+      const result = await tradeExecutor.executeRegularArbitrage(opportunity, tradeAmount);
+      
+      tradedOpportunityIdsRef.current.add(opportunity.id);
+      await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    const success = Math.random() > 0.15;
-    const status = success ? 'completed' : 'failed';
-    const actualProfit = success
-      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
-      : -(opportunity.estimated_profit * 0.5 || 1);
-    const gasUsed = (opportunity.gas_estimate || 0.5);
-    
-    // Generate realistic transaction hash for successful trades
-    const txHash = status === 'completed' 
-      ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
-      : null;
+      await recordExecution({
+        execution_type: 'trade',
+        status: result.success ? 'completed' : 'failed',
+        profit_realized: result.netProfit,
+        gas_used: result.gasUsed,
+        details: { 
+          opportunity: {
+            pair: opportunity.pair, 
+            buyDex: opportunity.buy_exchange, 
+            sellDex: opportunity.sell_exchange,
+            profitPercentage: opportunity.profit_percentage, 
+            netProfitUsd: result.netProfit,
+          },
+          tx_hash: result.txHash,
+          executionTime: result.executionTime,
+          slippage: result.slippage,
+          realExecution: true,
+          error: result.error
+        }
+      });
+      
+      console.log(`💰 REAL ARBITRAGE ${result.success ? 'SUCCESS' : 'FAILED'}: ${result.netProfit > 0 ? '+' : ''}$${result.netProfit.toFixed(2)}${result.txHash ? ` | TX: ${result.txHash}` : ''}`);
+    } else {
+      // SIMULATION MODE
+      console.log(`📈 BOT: REGULAR SIMULATION - Executing ${opportunity.pair}`);
+      
+      tradedOpportunityIdsRef.current.add(opportunity.id);
+      await ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    await recordExecution({
-      execution_type: 'trade',
-      status: status,
-      profit_realized: actualProfit,
-      gas_used: gasUsed,
-      details: { 
-        opportunity: {
-          pair: opportunity.pair, 
-          buyDex: opportunity.buy_exchange, 
-          sellDex: opportunity.sell_exchange,
-          profitPercentage: opportunity.profit_percentage, 
-          netProfitUsd: actualProfit,
-        },
-        tx_hash: txHash
-      }
-    });
-    
-    console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
-  }, [recordExecution]);
+      const success = Math.random() > 0.15;
+      const status = success ? 'completed' : 'failed';
+      const actualProfit = success
+        ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
+        : -(opportunity.estimated_profit * 0.5 || 1);
+      const gasUsed = (opportunity.gas_estimate || 0.5);
+      
+      // Generate realistic transaction hash for successful simulated trades
+      const txHash = status === 'completed' 
+        ? `0x${Math.random().toString(16).substring(2, 15)}${Date.now().toString(16)}${Math.random().toString(16).substring(2, 15)}`
+        : null;
+
+      await recordExecution({
+        execution_type: 'trade',
+        status: status,
+        profit_realized: actualProfit,
+        gas_used: gasUsed,
+        details: { 
+          opportunity: {
+            pair: opportunity.pair, 
+            buyDex: opportunity.buy_exchange, 
+            sellDex: opportunity.sell_exchange,
+            profitPercentage: opportunity.profit_percentage, 
+            netProfitUsd: actualProfit,
+          },
+          tx_hash: txHash,
+          realExecution: false // Mark as simulation
+        }
+      });
+      
+      console.log(`💰 BOT: REGULAR SIMULATION ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}${txHash ? ` | TX: ${txHash}` : ''}`);
+    }
+  }, [recordExecution, realTradingEnabled, tradeExecutor, botConfig]);
 
   const runTradingLoop = useCallback(async () => {
     try {
       await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Cycle', message: 'Starting trading loop.' } });
-      const { totalUsdc } = await fetchRealBalances();
+      await fetchRealBalances(); // Re-fetch balances at the start of each loop
       const opps = await scanForOpportunities();
       
       if (opps.length > 0) {
@@ -341,26 +441,37 @@ export default function BotPage() {
         await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Opportunity Found', message: `Found ${topOpp.pair} at ${topOpp.profit_percentage.toFixed(2)}%` } });
         
         if (flashloanConfig?.enabled) {
-          const grossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
-          const loanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
+          // FIX: Add detailed logging to debug the values being used.
+          const envLimit = tradingSafety.getConfig().maxFlashloanAmount;
+          const configAmount = flashloanConfig.amount;
+          const effectiveFlashloanAmount = Math.min(configAmount, envLimit);
+          
+          console.log('🤖 BOT DEBUG: Flashloan values', { configAmount, envLimit, effectiveFlashloanAmount });
+
+          const grossProfit = effectiveFlashloanAmount * (topOpp.profit_percentage / 100);
+          const loanFee = effectiveFlashloanAmount * (flashloanConfig.fee_percentage / 100);
           const netProfit = grossProfit - loanFee;
           
           await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Flashloan Analysis', message: `Gross: $${grossProfit.toFixed(2)}, Fee: $${loanFee.toFixed(2)}, Net: $${netProfit.toFixed(2)}` } });
           
           if (netProfit > 1) { 
             await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Decision', message: `Executing flashloan, net profit $${netProfit.toFixed(2)} is acceptable.` } });
-            await executeFlashloanArbitrage(topOpp, flashloanConfig);
+            // Pass the already-clamped amount to the execution function
+            await executeFlashloanArbitrage(topOpp, { ...flashloanConfig, amount: effectiveFlashloanAmount });
           } else {
             await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Decision', message: `Skipping flashloan, net profit $${netProfit.toFixed(2)} is too low.` } });
           }
         } else {
           await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Info', message: `Flashloans are disabled in config.` } });
+          // If flashloans are disabled, try regular arbitrage if conditions are met
+          // For now, this is kept simple and assumes flashloan is the primary strategy
+          // A more complex bot would decide based on capital available vs. flashloan
         }
       } else {
         await recordExecution({ execution_type: 'alert', status: 'completed', details: { alert_type: 'Scan Result', message: 'No profitable opportunities found this cycle.' } });
       }
     } catch (error) {
-      console.error("❌ FLASHLOAN BOT ERROR:", error);
+      console.error("❌ BOT ERROR during trading loop:", error);
       recordExecution({
         execution_type: 'error',
         status: 'failed',
@@ -421,6 +532,13 @@ export default function BotPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
+        {/* Environment Safety Badge */}
+        <div className="mb-4">
+          <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-bold ${tradingSafety.getEnvironmentBadge().class}`}>
+            {tradingSafety.getEnvironmentBadge().text} • Max Flashloan: ${tradingSafety.getConfig().maxFlashloanAmount.toLocaleString()}
+          </div>
+        </div>
+
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <div className={`p-3 rounded-xl ${getStatusColor()} bg-opacity-20`}>
@@ -436,25 +554,43 @@ export default function BotPage() {
                 {flashloanConfig?.enabled && isRunning && (
                   <Badge className="bg-purple-100 text-purple-800">
                     <Zap className="w-3 h-3 mr-1" />
-                    Flashloan ${flashloanConfig.amount.toLocaleString()}
+                    Flashloan ${Math.min(flashloanConfig.amount, tradingSafety.getConfig().maxFlashloanAmount).toLocaleString()}
+                  </Badge>
+                )}
+                {realTradingEnabled && (
+                  <Badge className="bg-red-100 text-red-800">
+                    🚨 REAL MONEY MODE
                   </Badge>
                 )}
               </div>
             </div>
           </div>
 
-          <Button
-            onClick={() => handleToggleBot()}
-            className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
-          >
-            {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => setRealTradingEnabled(!realTradingEnabled)}
+              variant={realTradingEnabled ? "destructive" : "outline"}
+              className={realTradingEnabled ? "bg-red-500 hover:bg-red-600" : "border-red-200 text-red-600 hover:bg-red-50"}
+            >
+              {realTradingEnabled ? "🚨 REAL TRADING ON" : "💫 SIMULATION MODE"}
+            </Button>
+            <Button
+              onClick={() => handleToggleBot()}
+              className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
+            >
+              {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
+            </Button>
+          </div>
         </div>
         
-        <Alert className="mb-6 border-blue-200 bg-blue-50">
+        <Alert className={`mb-6 ${realTradingEnabled ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'}`}>
           <Bot className="w-4 h-4" />
-          <AlertDescription className="text-blue-800">
-            <strong>Bot Status:</strong> Flashloans are ENABLED by default. The bot will prioritize flashloan trades when profitable, then fall back to regular arbitrage.
+          <AlertDescription className={realTradingEnabled ? 'text-red-800' : 'text-blue-800'}>
+            <strong>{realTradingEnabled ? 'REAL TRADING MODE:' : 'Simulation Mode:'}</strong> 
+            {realTradingEnabled 
+              ? ` Bot is executing REAL transactions in ${tradingSafety.environment.toUpperCase()} environment. All trades will appear on Polygonscan.`
+              : ' Bot is running in simulation mode. No real transactions are being executed.'
+            }
           </AlertDescription>
         </Alert>
 
@@ -503,7 +639,7 @@ export default function BotPage() {
                 <div>
                   <p className="text-sm text-slate-600">USDC Balance</p>
                   <h3 className="text-2xl font-bold text-orange-600">
-                    ${(nativeUsdcBalance + bridgedUsdcBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    {(nativeUsdcBalance + bridgedUsdcBalance).toLocaleString(undefined, {style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2})}
                   </h3>
                 </div>
                 <Zap className="w-8 h-8 text-orange-500" />

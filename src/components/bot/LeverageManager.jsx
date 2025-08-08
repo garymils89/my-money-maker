@@ -12,7 +12,8 @@ import { tradingSafety } from "./TradingSafetyLayer"; // Add this import
 export default function LeverageManager({ onConfigChange, simulationResult }) {
   // Use the safety layer's max flashloan amount as the default
   const maxAllowedFlashloan = tradingSafety.getConfig().maxFlashloanAmount;
-  const [loanAmount, setLoanAmount] = useState(Math.min(25000, maxAllowedFlashloan));
+  // The default state is now DIRECTLY from the safety layer, no hardcoded values.
+  const [loanAmount, setLoanAmount] = useState(maxAllowedFlashloan);
   const [provider, setProvider] = useState('aave');
 
   const handleConfigChange = () => {
