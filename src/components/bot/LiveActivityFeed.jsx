@@ -25,29 +25,19 @@ export default function LiveActivityFeed({ isRunning }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Try different query methods to debug the issue
         console.log("LiveActivityFeed: Attempting to fetch BotExecution data...");
         
-        // First try the basic list method with sorting and limit
-        let data = await BotExecution.list('-created_date', 50);
-        console.log("LiveActivityFeed: BotExecution.list returned:", data?.length || 0, "records");
+        // Try the basic list method first
+        const data = await BotExecution.list('-created_date', 50);
+        console.log("LiveActivityFeed: Raw data received:", data);
+        console.log("LiveActivityFeed: Data type:", typeof data);
+        console.log("LiveActivityFeed: Is array?", Array.isArray(data));
         
-        // If no data, try without sorting and limit
-        if (!data || data.length === 0) {
-          console.log("LiveActivityFeed: Trying unsorted query...");
-          data = await BotExecution.list();
-          console.log("LiveActivityFeed: Unsorted query returned:", data?.length || 0, "records");
-        }
+        // Ensure we always work with an array
+        const execArray = Array.isArray(data) ? data : [];
+        setExecutions(execArray);
         
-        // If still no data, try filter method
-        if (!data || data.length === 0) {
-          console.log("LiveActivityFeed: Trying filter method...");
-          data = await BotExecution.filter({});
-          console.log("LiveActivityFeed: Filter method returned:", data?.length || 0, "records");
-        }
-        
-        setExecutions(data || []);
-        console.log("LiveActivityFeed: Final data set to state:", (data || []).length, "records");
+        console.log("LiveActivityFeed: Final array length:", execArray.length);
       } catch (error) {
         console.error("LiveActivityFeed: Error fetching data:", error);
         setExecutions([]);
@@ -57,7 +47,7 @@ export default function LiveActivityFeed({ isRunning }) {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Slower refresh to reduce noise
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
 
