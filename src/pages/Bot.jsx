@@ -166,7 +166,8 @@ export default function BotPage() {
     await fetchRealBalances();
     const opps = await scanForOpportunities();
     
-    setExecutions(prev => [{ id: Date.now(), execution_type: 'scan', status: 'completed', details: {found: opps.length}}, ...prev].slice(0, 50));
+    // FIXED: Added 'created_date' to the scan log object to fix "Invalid Date" issue.
+    setExecutions(prev => [{ id: Date.now(), created_date: new Date().toISOString(), execution_type: 'scan', status: 'completed', details: {found: opps.length}}, ...prev].slice(0, 50));
     
     // UPDATED: Use total USDC balance for trade check
     const totalUsdc = nativeUsdcBalance + bridgedUsdcBalance;
