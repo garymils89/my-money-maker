@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,9 +24,8 @@ import LeverageManager from "../components/bot/LeverageManager";
 import { base44 } from "@/api/base44Client";
 import { ethers } from "ethers";
 
-// CORRECTED: Using the USDC.e address that contains your actual funds
-const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"; // Your actual USDC.e
-const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Bridged USDC
+const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 
 const USDC_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
@@ -39,7 +37,6 @@ export default function BotPage() {
   const [isLive, setIsLive] = useState(false);
   const [walletAddress, setWalletAddress] = useState(null);
   
-  // UPDATED: Separate states for each USDC type
   const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
   const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0);
   const [maticBalance, setMaticBalance] = useState(0);
@@ -59,13 +56,10 @@ export default function BotPage() {
 
   const providerRef = useRef(null);
   const walletRef = useRef(null);
-  // UPDATED: Separate contract refs
   const nativeUsdcContractRef = useRef(null);
   const bridgedUsdcContractRef = useRef(null);
   const intervalRef = useRef(null);
 
-  // --- Core Blockchain Functions ---
-  
   const initializeEngine = useCallback(async (currentConfig) => {
     try {
       const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
@@ -80,7 +74,6 @@ export default function BotPage() {
       const address = await walletRef.current.getAddress();
       setWalletAddress(address);
       
-      // UPDATED: Initialize both contracts
       nativeUsdcContractRef.current = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
       
@@ -95,10 +88,9 @@ export default function BotPage() {
   }, []);
 
   const fetchRealBalances = useCallback(async () => {
-    if (!walletRef.current || !nativeUsdcContractRef.current || !bridgedUsdcContractRef.current) return;
+    if (!walletRef.current || !nativeUsdcContractRef.current || !bridgedUsdcContractRef.current) return { totalUsdc: 0 };
     try {
       const address = await walletRef.current.getAddress();
-      // UPDATED: Fetch all three balances
       const [maticWei, nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
         providerRef.current.getBalance(address),
         nativeUsdcContractRef.current.balanceOf(address),
@@ -107,11 +99,18 @@ export default function BotPage() {
         bridgedUsdcContractRef.current.decimals()
       ]);
       
-      setMaticBalance(parseFloat(ethers.formatEther(maticWei)));
-      setNativeUsdcBalance(parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals))));
-      setBridgedUsdcBalance(parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals))));
+      const matic = parseFloat(ethers.formatEther(maticWei));
+      const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
+      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
+
+      setMaticBalance(matic);
+      setNativeUsdcBalance(nativeUsdc);
+      setBridgedUsdcBalance(bridgedUsdc);
+      
+      return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
       console.error("Error fetching balances:", error);
+      return { totalUsdc: 0 };
     }
   }, []);
 
@@ -133,7 +132,6 @@ export default function BotPage() {
     }
   }, [botConfig]);
   
-  // FIXED: Moved loadInitialData up and wrapped in useCallback
   const loadInitialData = useCallback(async () => {
     try {
       const historicalExecutions = await base44.entities.BotExecution.list({ sort: '-created_date', limit: 1000 });
@@ -160,7 +158,6 @@ export default function BotPage() {
     newDailyStats.gasUsed += (opportunity.gas_estimate || 0.5);
     setDailyStats(newDailyStats);
 
-    // FIXED: Structure the trade details properly so they display in the log
     await base44.entities.BotExecution.create({
       execution_type: 'trade',
       status: success ? 'completed' : 'failed',
@@ -178,21 +175,19 @@ export default function BotPage() {
           volume: opportunity.volume_available
         },
         tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2),
-        execution_time_ms: Math.floor(Math.random() * 2000) + 500 // Simulate execution time
+        execution_time_ms: Math.floor(Math.random() * 2000) + 500
       }
     });
     
-    await loadInitialData(); // FIXED: Refresh log after a trade
+    await loadInitialData();
   }, [dailyStats, loadInitialData]);
 
-  // --- Main Trading Loop ---
-  
   const runTradingLoop = useCallback(async () => {
     console.log("🔍 Scanning for opportunities...");
-    await fetchRealBalances();
+    const { totalUsdc } = await fetchRealBalances();
     const opps = await scanForOpportunities();
     
-    console.log(`Found ${opps.length} opportunities`);
+    console.log(`Found ${opps.length} opportunities. Current balance: $${totalUsdc.toFixed(2)}`);
     
     setExecutions(prev => [{ 
       id: Date.now(), 
@@ -202,14 +197,13 @@ export default function BotPage() {
       details: { found: opps.length }
     }, ...prev].slice(0, 50));
     
-    const totalUsdc = nativeUsdcBalance + bridgedUsdcBalance;
     if (opps.length > 0 && totalUsdc >= botConfig.max_position_size) {
       console.log('💎 Executing top opportunity:', opps[0]);
       await executeArbitrage(opps[0]);
+    } else if (opps.length > 0) {
+        console.log(`💰 Opportunity found, but balance $${totalUsdc.toFixed(2)} is less than required $${botConfig.max_position_size} to trade.`);
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig]);
-
-  // --- Control Functions ---
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, botConfig, loadInitialData]);
 
   const handleToggleBot = async () => {
     if (isRunning) {
@@ -226,8 +220,6 @@ export default function BotPage() {
       const success = await initializeEngine(botConfig);
       if (success) {
         setIsRunning(true);
-        await fetchRealBalances();
-        
         await runTradingLoop();
         
         intervalRef.current = setInterval(() => {
@@ -255,7 +247,6 @@ export default function BotPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <div className={`p-3 rounded-xl ${getStatusColor()} bg-opacity-20`}>
@@ -280,7 +271,6 @@ export default function BotPage() {
           </Button>
         </div>
 
-        {/* Alerts */}
         {!isLive ? (
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertTriangle className="w-4 h-4" />
@@ -297,13 +287,11 @@ export default function BotPage() {
           </Alert>
         )}
 
-        {/* Performance Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Trades Today</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Today's Profit</p><h3 className="text-2xl font-bold text-emerald-600">${dailyStats.profit.toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">MATIC Balance</p><h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3></div><Zap className="w-8 h-8 text-purple-500" /></div></CardContent></Card>
           
-          {/* UPDATED: Card now shows total USDC and a breakdown */}
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -322,7 +310,6 @@ export default function BotPage() {
           </Card>
         </div>
 
-        {/* Main Content Tabs */}
         <Tabs defaultValue="dashboard" className="space-y-6">
           <div className="bg-white/80 backdrop-blur-sm rounded-lg p-1">
             <TabsList className="grid w-full grid-cols-4">
