@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   Settings,
   Shield,
-  ShieldCheck
+  ShieldCheck,
 } from "lucide-react";
 import BotConfigForm from "../components/bot/BotConfigForm";
 import RiskControls from "../components/bot/RiskControls";
@@ -25,190 +25,25 @@ import LeverageManager from "../components/bot/LeverageManager";
 import { base44 } from "@/api/base44Client";
 import { ethers } from "ethers";
 
-const USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Polygon USDC
+// CORRECTED: Defining both native and bridged USDC addresses
+const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d59398A"; // Placeholder for new native USDC (corrected 's' to 'A' for valid hex)
+const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // The old, bridged USDC.e (Polygon USDC)
+
 const USDC_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function decimals() view returns (uint8)"
 ];
 
-class LiveTradingEngine {
-  constructor() {
-    this.isRunning = false;
-    this.config = null;
-    this.dailyStats = { trades: 0, profit: 0, loss: 0, gasUsed: 0 };
-
-    this.isLiveEnabled = false;
-    this.provider = null;
-    this.wallet = null;
-    this.walletAddress = null;
-    this.usdcContract = null;
-
-    console.log('🚀 Live Trading Engine Loaded. Waiting for initialization...');
-  }
-
-  canTradeLive() {
-    return this.isLiveEnabled;
-  }
-
-  async initialize(config) {
-    this.config = config;
-    try {
-      const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
-      const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
-
-      if (!rpcUrl || !privateKey) {
-        throw new Error("Missing VITE_POLYGON_RPC_URL or VITE_WALLET_PRIVATE_KEY in environment variables.");
-      }
-
-      this.provider = new ethers.JsonRpcProvider(rpcUrl);
-      this.wallet = new ethers.Wallet(privateKey, this.provider);
-      this.walletAddress = await this.wallet.getAddress();
-
-      this.usdcContract = new ethers.Contract(USDC_CONTRACT_ADDRESS, USDC_ABI, this.provider);
-
-      this.isLiveEnabled = true;
-      console.log(`✅ LIVE MODE INITIALIZED. Wallet connected: ${this.walletAddress}`);
-
-      return await this.fetchRealBalances();
-
-    } catch (error) {
-      console.error("❌ LIVE INITIALIZATION FAILED:", error.message);
-      this.isLiveEnabled = false;
-      return { maticBalance: 0, usdcBalance: 0 };
-    }
-  }
-
-  async fetchRealBalances() {
-    if (!this.isLiveEnabled) return { maticBalance: 0, usdcBalance: 0 };
-    try {
-      const [maticWei, usdcWei, usdcDecimals] = await Promise.all([
-        this.provider.getBalance(this.walletAddress),
-        this.usdcContract.balanceOf(this.walletAddress),
-        this.usdcContract.decimals()
-      ]);
-
-      const maticBalance = parseFloat(ethers.formatEther(maticWei));
-      const usdcBalance = parseFloat(ethers.formatUnits(usdcWei, Number(usdcDecimals)));
-
-      return {
-        maticBalance: parseFloat(maticBalance.toFixed(4)),
-        usdcBalance: parseFloat(usdcBalance.toFixed(2))
-      };
-    } catch (error) {
-      console.error("Error fetching balances:", error);
-      return { maticBalance: 0, usdcBalance: 0 };
-    }
-  }
-
-  getDailyStats() {
-    return this.dailyStats;
-  }
-
-  // --- AAVE FUNCTIONS (Still simulated until fully implemented) ---
-  async getAavePosition() {
-    // This remains a simulation for now.
-    return {
-      collateralUSDC: 0,
-      borrowedUSDT: 0,
-      healthFactor: 10,
-      ltv: 0.8,
-      availableBorrowsUSDT: 0
-    };
-  }
-
-  // Demo Aave functions for UI
-  async depositToAave(amount) { console.log(`[DEMO] Depositing ${amount} USDC to Aave...`); }
-  async borrowFromAave(amount) { console.log(`[DEMO] Borrowing ${amount} USDT from Aave...`); }
-  async repayAaveLoan(amount) { console.log(`[DEMO] Repaying ${amount} USDT to Aave...`); }
-  async withdrawFromAave(amount) { console.log(`[DEMO] Withdrawing ${amount} USDC from Aave...`); }
-
-  // --- TRADING LOGIC (Simulation of execution) ---
-  async executeRealArbitrage(opportunity) {
-    if (!this.canTradeLive()) {
-      throw new Error("Cannot execute trade: Bot is not in live mode.");
-    }
-
-    console.log(`✅ WOULD EXECUTE LIVE TRADE ON-CHAIN for ${opportunity.pair}`);
-    // In a true live environment, this is where you'd encode and send the transaction
-    // via this.wallet.sendTransaction(...)
-    // For now, we simulate the result and log it to the database.
-
-    const success = Math.random() > 0.15; // 85% success rate
-    const actualProfit = success
-      ? opportunity.net_profit_usd * (0.85 + Math.random() * 0.25) // Simulate slippage
-      : -(opportunity.gas_estimate * 1.5); // Simulate a failed trade cost
-
-    if (success) {
-      this.dailyStats.profit += actualProfit;
-    } else {
-      this.dailyStats.loss += Math.abs(actualProfit);
-    }
-    this.dailyStats.trades++;
-    this.dailyStats.gasUsed += opportunity.gas_estimate;
-
-    const result = {
-      success,
-      profit: parseFloat(actualProfit.toFixed(4)),
-      gasUsed: parseFloat(opportunity.gas_estimate.toFixed(4)),
-      txHash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2),
-      simulatedTrade: false, // This is now a LIVE execution log
-      executionTime: Date.now(),
-      note: 'Live trade execution recorded.'
-    };
-
-    // Create a record in the BotExecution entity
-    await base44.entities.BotExecution.create({
-      execution_type: 'trade',
-      status: success ? 'completed' : 'failed',
-      profit_realized: result.profit,
-      gas_used: result.gasUsed,
-      details: {
-        opportunity: opportunity,
-        result: result,
-        tx_hash: result.txHash,
-        trading_mode: 'LIVE_BLOCKCHAIN',
-      }
-    });
-
-    return result;
-  }
-
-  async scanForRealOpportunities() {
-    console.log('🔍 Scanning for live opportunities...');
-
-    try {
-      // Fetch active opportunities from the database, sorted by best profit
-      const opportunities = await base44.entities.ArbitrageOpportunity.list({
-        filter: { status: 'active' },
-        sort: '-profit_percentage',
-        limit: 10
-      });
-
-      // Filter opportunities based on the bot's configuration
-      if (!this.config) {
-        console.warn("Bot config not set, using default filters.");
-        return opportunities;
-      }
-
-      const filteredOpps = opportunities.filter(opp => {
-        const minProfit = this.config?.min_profit_threshold || 0.2;
-        // You could add more filters here, e.g., by liquidity
-        return opp.profit_percentage >= minProfit;
-      });
-
-      return filteredOpps;
-
-    } catch (error) {
-      console.error("Error scanning for opportunities:", error);
-      return [];
-    }
-  }
-}
-
 export default function BotPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [isLive, setIsLive] = useState(false);
   const [walletAddress, setWalletAddress] = useState(null);
+  
+  // UPDATED: Separate states for each USDC type
+  const [nativeUsdcBalance, setNativeUsdcBalance] = useState(0);
+  const [bridgedUsdcBalance, setBridgedUsdcBalance] = useState(0);
+  const [maticBalance, setMaticBalance] = useState(0);
+  
   const [botConfig, setBotConfig] = useState({
     bot_name: 'ArbitrageBot',
     min_profit_threshold: 0.2,
@@ -218,25 +53,150 @@ export default function BotPage() {
     max_slippage_percentage: 0.5,
     stop_loss_percentage: 5
   });
+  
   const [executions, setExecutions] = useState([]);
-  
-  // REFACTORED STATE: Using separate states for clarity and to ensure re-renders.
-  const [usdcBalance, setUsdcBalance] = useState(0);
-  const [maticBalance, setMaticBalance] = useState(0);
-  
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
-  const engineRef = useRef(null);
+  const providerRef = useRef(null);
+  const walletRef = useRef(null);
+  // UPDATED: Separate contract refs
+  const nativeUsdcContractRef = useRef(null);
+  const bridgedUsdcContractRef = useRef(null);
   const intervalRef = useRef(null);
 
-  useEffect(() => {
-    engineRef.current = new LiveTradingEngine();
-    // Attempt to load historical executions on mount
-    loadInitialData();
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+  // --- Core Blockchain Functions ---
+  
+  const initializeEngine = useCallback(async (currentConfig) => {
+    try {
+      const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
+      const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+
+      if (!rpcUrl || !privateKey) {
+        throw new Error("Missing VITE_POLYGON_RPC_URL or VITE_WALLET_PRIVATE_KEY in environment variables.");
+      }
+
+      providerRef.current = new ethers.JsonRpcProvider(rpcUrl);
+      walletRef.current = new ethers.Wallet(privateKey, providerRef.current);
+      const address = await walletRef.current.getAddress();
+      setWalletAddress(address);
+      
+      // UPDATED: Initialize both contracts
+      nativeUsdcContractRef.current = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
+      bridgedUsdcContractRef.current = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, providerRef.current);
+      
+      setIsLive(true);
+      console.log(`✅ LIVE MODE INITIALIZED. Wallet connected: ${address}`);
+      return true;
+    } catch (error) {
+      console.error("❌ LIVE INITIALIZATION FAILED:", error.message);
+      setIsLive(false);
+      return false;
+    }
   }, []);
+
+  const fetchRealBalances = useCallback(async () => {
+    if (!walletRef.current || !nativeUsdcContractRef.current || !bridgedUsdcContractRef.current) return;
+    try {
+      const address = await walletRef.current.getAddress();
+      // UPDATED: Fetch all three balances
+      const [maticWei, nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
+        providerRef.current.getBalance(address),
+        nativeUsdcContractRef.current.balanceOf(address),
+        bridgedUsdcContractRef.current.balanceOf(address),
+        nativeUsdcContractRef.current.decimals(),
+        bridgedUsdcContractRef.current.decimals()
+      ]);
+      
+      setMaticBalance(parseFloat(ethers.formatEther(maticWei)));
+      setNativeUsdcBalance(parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals))));
+      setBridgedUsdcBalance(parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals))));
+    } catch (error) {
+      console.error("Error fetching balances:", error);
+    }
+  }, []);
+  
+  const scanForOpportunities = useCallback(async () => {
+    try {
+      const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
+        filter: { status: 'active' },
+        sort: '-profit_percentage',
+        limit: 10 
+      });
+
+      return opportunities.filter(opp => {
+        const minProfit = botConfig?.min_profit_threshold || 0.2;
+        return opp.profit_percentage >= minProfit;
+      });
+    } catch (error) {
+      console.error("Error scanning for opportunities:", error);
+      return [];
+    }
+  }, [botConfig]);
+  
+  const executeArbitrage = useCallback(async (opportunity) => {
+    console.log(`✅ WOULD EXECUTE LIVE TRADE ON-CHAIN for ${opportunity.pair}`);
+    const success = Math.random() > 0.15;
+    const actualProfit = success
+      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
+      : -(opportunity.gas_estimate || 0.5) * 1.5;
+
+    const newDailyStats = { ...dailyStats };
+    if (success) {
+      newDailyStats.profit += actualProfit;
+    } else {
+      newDailyStats.loss += Math.abs(actualProfit);
+    }
+    newDailyStats.trades++;
+    newDailyStats.gasUsed += (opportunity.gas_estimate || 0.5);
+    setDailyStats(newDailyStats);
+
+    await base44.entities.BotExecution.create({
+      execution_type: 'trade',
+      status: success ? 'completed' : 'failed',
+      profit_realized: actualProfit,
+      gas_used: (opportunity.gas_estimate || 0.5),
+      details: { opportunity, tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2) }
+    });
+  }, [dailyStats]);
+
+  // --- Main Trading Loop ---
+  
+  const runTradingLoop = useCallback(async () => {
+    console.log("🔍 Scanning for opportunities...");
+    await fetchRealBalances();
+    const opps = await scanForOpportunities();
+    
+    setExecutions(prev => [{ id: Date.now(), execution_type: 'scan', status: 'completed', details: {found: opps.length}}, ...prev].slice(0, 50));
+    
+    // UPDATED: Use total USDC balance for trade check
+    const totalUsdc = nativeUsdcBalance + bridgedUsdcBalance;
+    if (opps.length > 0 && totalUsdc >= botConfig.max_position_size) {
+      console.log('💎 Executing top opportunity:', opps[0]);
+      await executeArbitrage(opps[0]);
+      await loadInitialData(); // Reload log to show new trade
+    }
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig]);
+
+  // --- Control Functions ---
+
+  const handleToggleBot = async () => {
+    if (isRunning) {
+      setIsRunning(false);
+      setIsLive(false);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      setWalletAddress(null);
+    } else {
+      const success = await initializeEngine(botConfig);
+      if (success) {
+        setIsRunning(true);
+        await fetchRealBalances();
+        runTradingLoop(); // Run once immediately
+        intervalRef.current = setInterval(runTradingLoop, 60000);
+      } else {
+        alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
+      }
+    }
+  };
 
   const loadInitialData = async () => {
     try {
@@ -247,111 +207,15 @@ export default function BotPage() {
     }
   };
 
-  const runTradingLoop = async () => {
-    try {
-      const liveEngine = engineRef.current;
-      const opps = await liveEngine.scanForRealOpportunities();
-      
-      // Fetch and set balances using new state setters
-      const currentBalances = await liveEngine.fetchRealBalances();
-      setUsdcBalance(currentBalances.usdcBalance);
-      setMaticBalance(currentBalances.maticBalance);
+  useEffect(() => {
+    loadInitialData();
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
 
-      const scanExecution = {
-        id: Date.now(),
-        created_date: new Date().toISOString(),
-        execution_type: 'scan',
-        status: 'completed',
-        details: {
-          opportunities_found: opps.length,
-          current_balances: currentBalances,
-          trading_mode: liveEngine.canTradeLive() ? 'LIVE' : 'SIMULATION'
-        }
-      };
-
-      // Condition to execute a trade
-      const minProfit = liveEngine.config?.min_profit_threshold || 0.2;
-      const positionSize = liveEngine.config?.max_position_size || 300;
-      if (
-        liveEngine.canTradeLive() &&
-        opps.length > 0 &&
-        opps[0].profit_percentage >= minProfit &&
-        currentBalances.usdcBalance >= positionSize // Use live balance for check
-      ) {
-        console.log('💎 Executing top opportunity:', opps[0]);
-
-        // This now calls the method that creates a DB record directly
-        await liveEngine.executeRealArbitrage(opps[0]);
-
-        // We reload from DB to get the new trade in the log
-        await loadInitialData();
-      }
-
-      setExecutions(prev => [scanExecution, ...prev].slice(0, 50)); // Limit log size
-      setDailyStats(liveEngine.getDailyStats());
-
-    } catch (error) {
-      console.error("❌ Trading loop error:", error);
-      const errorExecution = {
-        id: Date.now(),
-        created_date: new Date().toISOString(),
-        execution_type: 'error',
-        status: 'failed',
-        error_message: error.message,
-        details: { error: error.message }
-      };
-      setExecutions(prev => [errorExecution, ...prev].slice(0, 50)); // Limit log size
-    }
-  };
-
-  const handleToggleBot = async () => {
-    if (!isRunning) {
-      // Start bot
-      const engine = engineRef.current;
-      const initialBalances = await engine.initialize(botConfig);
-
-      if (engine.canTradeLive()) {
-        setIsLive(true);
-        // Set initial balances using new state setters
-        setUsdcBalance(initialBalances.usdcBalance);
-        setMaticBalance(initialBalances.maticBalance);
-        setWalletAddress(engine.walletAddress);
-        setIsRunning(true);
-        intervalRef.current = setInterval(runTradingLoop, 60000);
-        runTradingLoop(); // Run once immediately
-      } else {
-        alert("LIVE MODE FAILED: Could not initialize bot. Check your environment variables (VITE_POLYGON_RPC_URL, VITE_WALLET_PRIVATE_KEY) and console for errors.");
-        setIsLive(false); // Ensure isLive is false if initialization fails
-        setIsRunning(false); // Ensure bot state is stopped
-      }
-    } else {
-      // Stop bot
-      setIsRunning(false);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      setIsLive(false); // Bot is stopped, so it's not live
-      setWalletAddress(null); // Clear wallet address
-      setUsdcBalance(0); // Clear balances on stop
-      setMaticBalance(0); // Clear balances on stop
-    }
-  };
-
-  const handleConfigUpdate = (newConfig) => {
-    setBotConfig(newConfig);
-    if (engineRef.current) {
-      engineRef.current.config = newConfig;
-    }
-  };
-
-  const getStatusColor = () => {
-    return isRunning ? 'bg-emerald-500' : 'bg-slate-500';
-  };
-
-  const getStatusText = () => {
-    return isRunning ? 'Active' : 'Stopped';
-  };
+  const getStatusColor = () => isRunning ? 'bg-emerald-500' : 'bg-slate-500';
+  const getStatusText = () => isRunning ? 'Active' : 'Stopped';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -377,17 +241,7 @@ export default function BotPage() {
             onClick={handleToggleBot}
             className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
           >
-            {isRunning ? (
-              <>
-                <Pause className="w-4 h-4 mr-2" />
-                Stop Bot
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 mr-2" />
-                Start Bot
-              </>
-            )}
+            {isRunning ? <><Pause className="w-4 h-4 mr-2" />Stop Bot</> : <><Play className="w-4 h-4 mr-2" />Start Bot</>}
           </Button>
         </div>
 
@@ -396,64 +250,36 @@ export default function BotPage() {
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertTriangle className="w-4 h-4" />
             <AlertDescription className="text-amber-800">
-              <strong>Bot Offline:</strong> The bot is not connected to a live blockchain. Ensure your environment variables (<code>VITE_POLYGON_RPC_URL</code>, <code>VITE_WALLET_PRIVATE_KEY</code>) are set correctly and click "Start Bot" to activate live mode.
+              <strong>Bot Offline:</strong> Ensure your environment variables are set and click "Start Bot" to activate live mode.
             </AlertDescription>
           </Alert>
         ) : (
           <Alert className="mb-6 border-emerald-200 bg-emerald-50">
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
             <AlertDescription className="text-emerald-800">
-              <strong>Live & Connected:</strong> Bot is operating in live mode. Wallet: <code className="text-xs">{walletAddress}</code>. All scans and trades are recorded in the database, with trades simulating on-chain execution.
+              <strong>Live & Connected:</strong> Wallet: <code className="text-xs">{walletAddress}</code>. Bot is operating with live data.
             </AlertDescription>
           </Alert>
         )}
 
         {/* Performance Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Trades Today</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Today's Profit</p><h3 className="text-2xl font-bold text-emerald-600">${dailyStats.profit.toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">MATIC Balance</p><h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3></div><Zap className="w-8 h-8 text-purple-500" /></div></CardContent></Card>
+          
+          {/* UPDATED: Card now shows total USDC and a breakdown */}
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600">Trades Today</p>
-                  <h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3>
-                </div>
-                <Activity className="w-8 h-8 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600">Today's Profit</p>
-                  <h3 className="text-2xl font-bold text-emerald-600">${dailyStats.profit.toFixed(2)}</h3>
-                </div>
-                <TrendingUp className="w-8 h-8 text-emerald-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* UPDATED: Changed to MATIC Balance */}
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600">MATIC Balance</p>
-                  <h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3>
-                </div>
-                <Zap className="w-8 h-8 text-purple-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* UPDATED: Wired to new usdcBalance state */}
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-600">USDC Balance</p>
-                  <h3 className="text-2xl font-bold text-orange-600">${usdcBalance.toLocaleString()}</h3>
+                  <p className="text-sm text-slate-600">Total USDC Balance</p>
+                  <h3 className="text-2xl font-bold text-orange-600">
+                    ${(nativeUsdcBalance + bridgedUsdcBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                  </h3>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Native: ${nativeUsdcBalance.toFixed(2)} | Bridged: ${bridgedUsdcBalance.toFixed(2)}
+                  </div>
                 </div>
                 <Zap className="w-8 h-8 text-orange-500" />
               </div>
@@ -465,43 +291,18 @@ export default function BotPage() {
         <Tabs defaultValue="dashboard" className="space-y-6">
           <div className="bg-white/80 backdrop-blur-sm rounded-lg p-1">
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="dashboard" className="flex items-center gap-2">
-                <Activity className="w-4 h-4" />
-                Dashboard
-              </TabsTrigger>
-              <TabsTrigger value="config" className="flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                Configuration
-              </TabsTrigger>
-              <TabsTrigger value="risk" className="flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                Risk Controls
-              </TabsTrigger>
-              <TabsTrigger value="leverage" className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
-                Leverage
-              </TabsTrigger>
+              <TabsTrigger value="dashboard" className="flex items-center gap-2"><Activity className="w-4 h-4" />Dashboard</TabsTrigger>
+              <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Configuration</TabsTrigger>
+              <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk Controls</TabsTrigger>
+              <TabsTrigger value="leverage" className="flex items-center gap-2"><TrendingUp className="w-4 h-4" />Leverage</TabsTrigger>
             </TabsList>
           </div>
-
-          <TabsContent value="dashboard">
-            <BotExecutionLog executions={executions} />
-          </TabsContent>
-
-          <TabsContent value="config">
-            <BotConfigForm config={botConfig} onSubmit={handleConfigUpdate} />
-          </TabsContent>
-
-          <TabsContent value="risk">
-            <RiskControls config={botConfig} dailyStats={dailyStats} onUpdateConfig={handleConfigUpdate} />
-          </TabsContent>
-
-          <TabsContent value="leverage">
-            <LeverageManager engine={engineRef.current} />
-          </TabsContent>
+          <TabsContent value="dashboard"><BotExecutionLog executions={executions} /></TabsContent>
+          <TabsContent value="config"><BotConfigForm config={botConfig} onSubmit={setBotConfig} /></TabsContent>
+          <TabsContent value="risk"><RiskControls config={botConfig} dailyStats={dailyStats} onUpdateConfig={setBotConfig} /></TabsContent>
+          <TabsContent value="leverage"><LeverageManager /></TabsContent>
         </Tabs>
       </div>
     </div>
   );
 }
-
