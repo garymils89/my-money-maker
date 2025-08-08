@@ -18,8 +18,8 @@ import {
 import { motion } from "framer-motion";
 import { BotExecution } from "@/api/entities"; // Import entity
 
-export default function BotExecutionLog({ executions: initialExecutions = [] }) {
-  const [executions, setExecutions] = useState(initialExecutions);
+export default function BotExecutionLog() { // REMOVED executions prop
+  const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');

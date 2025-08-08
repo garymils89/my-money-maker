@@ -1,12 +1,13 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
-  Activity, 
-  Zap, 
-  TrendingUp, 
-  Search, 
+import {
+  Activity,
+  Zap,
+  TrendingUp,
+  Search,
   AlertTriangle,
   DollarSign,
   Clock,
@@ -14,17 +15,37 @@ import {
   XCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { BotExecution } from "@/api/entities";
 
-export default function LiveActivityFeed({ executions = [], isRunning }) {
+export default function LiveActivityFeed({ isRunning }) {
+  const [executions, setExecutions] = useState([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch the last 15 records to keep the feed focused
+        const data = await BotExecution.list('-created_date', 15);
+        setExecutions(data);
+      } catch (error) {
+        console.error("LiveActivityFeed: Error fetching data", error);
+      }
+    };
+
+    fetchData(); // Fetch immediately on load
+    const interval = setInterval(fetchData, 5000); // Refresh every 5 seconds
+
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, []);
+
   const getExecutionIcon = (type, status) => {
     if (type === 'flashloan_trade') {
-      return status === 'completed' ? 
-        <Zap className="w-4 h-4 text-purple-500" /> : 
+      return status === 'completed' ?
+        <Zap className="w-4 h-4 text-purple-500" /> :
         <XCircle className="w-4 h-4 text-red-500" />;
     }
     if (type === 'trade') {
-      return status === 'completed' ? 
-        <TrendingUp className="w-4 h-4 text-emerald-500" /> : 
+      return status === 'completed' ?
+        <TrendingUp className="w-4 h-4 text-emerald-500" /> :
         <XCircle className="w-4 h-4 text-red-500" />;
     }
     if (type === 'scan') return <Search className="w-4 h-4 text-blue-500" />;
@@ -42,15 +63,16 @@ export default function LiveActivityFeed({ executions = [], isRunning }) {
   };
 
   const formatTime = (dateString) => {
-    return new Date(dateString).toLocaleTimeString('en-US', { 
-      hour12: false, 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit' 
+    return new Date(dateString).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
     });
   };
 
-  const recentExecutions = executions.slice(0, 10);
+  // No longer need to slice, we fetch the exact number needed
+  const recentExecutions = executions;
 
   return (
     <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
@@ -67,7 +89,7 @@ export default function LiveActivityFeed({ executions = [], isRunning }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-80">
+        <ScrollArea className="h-[450px]">
           <AnimatePresence>
             {recentExecutions.length > 0 ? (
               <div className="space-y-3">
@@ -82,7 +104,7 @@ export default function LiveActivityFeed({ executions = [], isRunning }) {
                     <div className="flex-shrink-0 mt-0.5">
                       {getExecutionIcon(execution.execution_type, execution.status)}
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-slate-900 capitalize text-sm">
@@ -113,7 +135,7 @@ export default function LiveActivityFeed({ executions = [], isRunning }) {
                             </span>
                           </div>
                           <div className="text-xs text-slate-500">
-                            {execution.details.opportunity?.buyDex} → {execution.details.opportunity?.sellDex} • 
+                            {execution.details.opportunity?.buyDex} → {execution.details.opportunity?.sellDex} •
                             Fee: ${execution.details.loanFee?.toFixed(2)}
                           </div>
                         </div>

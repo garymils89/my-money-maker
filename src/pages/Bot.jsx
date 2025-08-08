@@ -56,6 +56,8 @@ export default function BotPage() {
     stop_loss_percentage: 5
   });
 
+  // Revert to initial object state for flashloanConfig to prevent runtime errors
+  // as its properties (e.g., flashloanConfig.amount) are accessed directly.
   const [flashloanConfig, setFlashloanConfig] = useState({
     enabled: true,
     amount: 25000,
@@ -64,7 +66,8 @@ export default function BotPage() {
   });
   const [lastFlashloanSim, setLastFlashloanSim] = useState(null);
   
-  const [executions, setExecutions] = useState([]);
+  // REMOVED [executions, setExecutions] - this was the source of the bug.
+  
   const [dailyStats, setDailyStats] = useState({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
 
   const providerRef = useRef(null);
@@ -129,15 +132,7 @@ export default function BotPage() {
     }
   }, []);
 
-  const loadHistoricalExecutions = useCallback(async () => {
-    try {
-      const historicalExecutions = await BotExecution.list('-created_date', 100);
-      setExecutions(historicalExecutions);
-      console.log(`📊 BOT: Loaded ${historicalExecutions.length} historical executions`);
-    } catch (error) {
-      console.error("BOT: Could not load historical executions:", error);
-    }
-  }, []);
+  // REMOVED loadHistoricalExecutions - components will do this themselves.
 
   const scanForOpportunities = useCallback(async () => {
     try {
@@ -158,17 +153,9 @@ export default function BotPage() {
 
   const recordExecution = useCallback(async (executionData) => {
     try {
-      // Create in database FIRST
-      const savedExecution = await BotExecution.create(executionData);
-      
-      // Then update UI
-      const finalExecution = {
-        ...savedExecution,
-        created_date: new Date().toISOString()
-      };
-      setExecutions(prev => [finalExecution, ...prev.slice(0, 49)]);
-      
-      console.log(`💾 BOT: Recorded execution: ${executionData.execution_type} - ${executionData.status}`);
+      // ONLY create in the database. The UI will pick it up automatically.
+      await BotExecution.create(executionData);
+      console.log(`💾 BOT: Recorded execution to DB: ${executionData.execution_type} - ${executionData.status}`);
     } catch(err) {
       console.error("❌ BOT: Failed to save execution record:", err);
     }
@@ -217,7 +204,7 @@ export default function BotPage() {
     }));
 
     console.log(`💰 FLASHLOAN ${status.toUpperCase()}: ${profitRealized > 0 ? '+' : ''}$${profitRealized.toFixed(2)}`);
-  }, [recordExecution]);
+  }, [recordExecution, setDailyStats]); // Added setDailyStats
 
   const executeArbitrage = useCallback(async (opportunity) => {
     console.log(`📈 BOT: REGULAR - Executing ${opportunity.pair}`);
@@ -258,7 +245,7 @@ export default function BotPage() {
     }));
 
     console.log(`💰 BOT: REGULAR ${status.toUpperCase()}: ${actualProfit > 0 ? '+' : ''}$${actualProfit.toFixed(2)}`);
-  }, [recordExecution]);
+  }, [recordExecution, setDailyStats]); // Added setDailyStats
 
   const runTradingLoop = useCallback(async () => {
     try {
@@ -299,13 +286,13 @@ export default function BotPage() {
         error_message: error.message
       });
     }
-  }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, flashloanConfig, recordExecution]); // Added recordExecution back for error logging
+  }, [fetchRealBalances, scanForOpportunities, executeFlashloanArbitrage, executeArbitrage, recordExecution, flashloanConfig, botConfig]); // Added executeArbitrage and botConfig
 
-  // Check localStorage on initial load to see if bot should be running
+  // This effect now correctly handles the bot's lifecycle
   useEffect(() => {
     const savedBotState = localStorage.getItem('arbitragebot_running');
     if (savedBotState === 'true' && !isRunning) {
-      handleToggleBot(true); // Start bot if it was running before
+      handleToggleBot(true); 
     }
   }, []); // Empty dependency array means this runs once on mount
 
@@ -346,9 +333,7 @@ export default function BotPage() {
     }
   };
 
-  useEffect(() => {
-    loadHistoricalExecutions();
-  }, [loadHistoricalExecutions]);
+  // REMOVED useEffect for loadHistoricalExecutions as components now fetch their own data.
 
   const getStatusColor = () => isRunning ? 'bg-emerald-500' : 'bg-slate-500';
   const getStatusText = () => isRunning ? 'Active' : 'Stopped';
@@ -459,11 +444,13 @@ export default function BotPage() {
           </div>
 
           <TabsContent value="activity">
-            <LiveActivityFeed executions={executions} isRunning={isRunning} />
+            {/* REMOVED executions prop - component is now self-sufficient */}
+            <LiveActivityFeed isRunning={isRunning} />
           </TabsContent>
           
           <TabsContent value="dashboard">
-            <BotExecutionLog executions={executions} />
+            {/* REMOVED executions prop */}
+            <BotExecutionLog />
           </TabsContent>
           
           <TabsContent value="config">
