@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,7 @@ export default function BotPage() {
 
       setMaticBalance(matic);
       setNativeUsdcBalance(nativeUsdc);
-      setBridgedUsdcBalance(bridgedUsdc);
+      setBridgedUsdcBalance(bridgedUsdc); // Fix: Changed 'briddcUsdc' to 'bridgedUsdc'
       
       return { totalUsdc: nativeUsdc + bridgedUsdc };
     } catch (error) {
@@ -123,24 +124,6 @@ export default function BotPage() {
     }
   }, []);
 
-  const scanForOpportunities = useCallback(async () => {
-    try {
-      const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
-        filter: { status: 'active' },
-        sort: '-profit_percentage',
-        limit: 10 
-      });
-
-      return opportunities.filter(opp => {
-        const minProfit = botConfig?.min_profit_threshold || 0.2;
-        return opp.profit_percentage >= minProfit;
-      });
-    } catch (error) {
-      console.error("Error scanning for opportunities:", error);
-      return [];
-    }
-  }, [botConfig]);
-  
   const executeArbitrage = useCallback(async (opportunity) => {
     // FIXED: Simulate success/failure for realism
     const success = Math.random() > 0.15; // 85% success rate
@@ -151,6 +134,15 @@ export default function BotPage() {
     const gasUsed = (opportunity.gas_estimate || 0.5);
 
     console.log(`✅ SIMULATING TRADE: ${opportunity.pair} | Status: ${status} | P&L: $${actualProfit.toFixed(2)}`);
+    console.log(`🔄 MARKING OPPORTUNITY ${opportunity.id} AS EXECUTED...`);
+
+    // CRITICAL FIX: Mark opportunity as executed IMMEDIATELY and await it
+    try {
+      await base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' });
+      console.log(`✅ OPPORTUNITY ${opportunity.id} MARKED AS EXECUTED SUCCESSFULLY`);
+    } catch (error) {
+      console.error(`❌ FAILED TO MARK OPPORTUNITY ${opportunity.id} AS EXECUTED:`, error);
+    }
 
     const newExecution = {
       execution_type: 'trade',
@@ -172,11 +164,13 @@ export default function BotPage() {
     // Instantly update the UI with a temporary ID
     setExecutions(prev => [{...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
 
-    // Update database in the background
-    await Promise.all([
-      base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }),
-      base44.entities.BotExecution.create(newExecution)
-    ]);
+    // Save execution log to database
+    try {
+      await base44.entities.BotExecution.create(newExecution);
+      console.log(`✅ EXECUTION LOG SAVED SUCCESSFULLY`);
+    } catch (error) {
+      console.error(`❌ FAILED TO SAVE EXECUTION LOG:`, error);
+    }
     
     // Update daily stats correctly
     setDailyStats(prev => ({
@@ -187,8 +181,38 @@ export default function BotPage() {
       gasUsed: prev.gasUsed + gasUsed
     }));
 
-  }, [botConfig]);
+  }, []);
 
+  const scanForOpportunities = useCallback(async () => {
+    try {
+      console.log(`🔍 SCANNING: Looking for opportunities with status='active'...`);
+      
+      const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
+        filter: { status: 'active' },
+        sort: '-profit_percentage',
+        limit: 10 
+      });
+
+      console.log(`📊 SCAN RESULT: Found ${opportunities.length} active opportunities`);
+      if (opportunities.length > 0) {
+        console.log(`🔍 First opportunity details:`, {
+          id: opportunities[0].id,
+          pair: opportunities[0].pair,
+          status: opportunities[0].status,
+          profit: opportunities[0].profit_percentage
+        });
+      }
+
+      return opportunities.filter(opp => {
+        const minProfit = botConfig?.min_profit_threshold || 0.2;
+        return opp.profit_percentage >= minProfit;
+      });
+    } catch (error) {
+      console.error("❌ ERROR SCANNING FOR OPPORTUNITIES:", error);
+      return [];
+    }
+  }, [botConfig]);
+  
   const runTradingLoop = useCallback(async () => {
     console.log("🔍 Scanning for opportunities...");
     const { totalUsdc } = await fetchRealBalances();
