@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,21 +19,24 @@ import { BotExecution } from "@/api/entities";
 
 export default function LiveActivityFeed({ isRunning }) {
   const [executions, setExecutions] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const data = await BotExecution.list('-created_date', 25); // Fetch more records for detailed logs
+        const data = await BotExecution.list('-created_date', 25);
         setExecutions(data);
+        console.log("LiveActivityFeed: Loaded", data.length, "executions from database");
       } catch (error) {
         console.error("LiveActivityFeed: Error fetching data", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchData(); // Fetch immediately on load
-    const interval = setInterval(fetchData, 4000); // Refresh faster
-
-    return () => clearInterval(interval); // Cleanup on unmount
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const getExecutionIcon = (execution) => {
@@ -75,13 +77,26 @@ export default function LiveActivityFeed({ isRunning }) {
     });
   };
 
+  if (isLoading) {
+    return (
+      <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+        <CardContent className="p-6">
+          <div className="text-center py-8">
+            <Activity className="w-12 h-12 text-slate-400 mx-auto mb-3 animate-pulse" />
+            <p className="text-slate-600">Loading bot activity...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Activity className="w-5 h-5 text-orange-500" />
-            Live Bot Activity
+            Live Bot Activity ({executions.length} events)
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`} />
@@ -109,7 +124,7 @@ export default function LiveActivityFeed({ isRunning }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-slate-900 capitalize text-sm">
-                          {execution.execution_type === 'alert' ? execution.details.alert_type : execution.execution_type.replace('_', ' ')}
+                          {execution.execution_type === 'alert' ? execution.details?.alert_type : execution.execution_type.replace('_', ' ')}
                         </span>
                         <Badge className={getStatusColor(execution)}>
                           {execution.status}
@@ -125,8 +140,8 @@ export default function LiveActivityFeed({ isRunning }) {
                          <div className="text-sm">
                           <div className="flex items-center justify-between">
                             <span className="text-slate-600">
-                              {execution.details.opportunity?.pair}
-                              {execution.execution_type === 'flashloan_trade' && execution.details.loanAmount &&
+                              {execution.details?.opportunity?.pair}
+                              {execution.execution_type === 'flashloan_trade' && execution.details?.loanAmount &&
                                 ` • $${execution.details.loanAmount?.toLocaleString()} loan`
                               }
                             </span>
@@ -148,7 +163,7 @@ export default function LiveActivityFeed({ isRunning }) {
                       {/* Alert Details */}
                       {execution.execution_type === 'alert' && (
                         <div className="text-sm text-slate-600">
-                          {execution.details.message}
+                          {execution.details?.message}
                         </div>
                       )}
                       
