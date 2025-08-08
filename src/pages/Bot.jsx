@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -115,7 +114,6 @@ export default function BotPage() {
     }
   }, []);
 
-  // FIXED: Renamed loadInitialData to loadHistoricalExecutions for clarity
   const loadHistoricalExecutions = useCallback(async () => {
     try {
       const historicalExecutions = await base44.entities.BotExecution.list({ sort: '-created_date', limit: 100 });
@@ -128,7 +126,7 @@ export default function BotPage() {
   const scanForOpportunities = useCallback(async () => {
     try {
       const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
-        filter: { status: 'active' }, // Ensure we only get active ones
+        filter: { status: 'active' },
         sort: '-profit_percentage',
         limit: 10 
       });
@@ -144,51 +142,43 @@ export default function BotPage() {
   }, [botConfig]);
   
   const executeArbitrage = useCallback(async (opportunity) => {
-    console.log(`✅ EXECUTING LIVE TRADE ON-CHAIN for ${opportunity.pair}`);
-    
-    // Simulate some profit and gas usage
-    const success = Math.random() > 0.15; // Still simulate success/failure for profit calculation
+    // FIXED: Simulate success/failure for realism
+    const success = Math.random() > 0.15; // 85% success rate
     const actualProfit = success
-      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25)
-      : -(opportunity.gas_estimate || 0.5) * 1.5;
+      ? opportunity.estimated_profit * (0.85 + Math.random() * 0.25) // Simulate slippage
+      : -(opportunity.estimated_profit * 0.5 || 1); // Failed trade costs something
+    const status = success ? 'completed' : 'failed';
     const gasUsed = (opportunity.gas_estimate || 0.5);
 
-    // --- Create the execution record FIRST ---
+    console.log(`✅ SIMULATING TRADE: ${opportunity.pair} | Status: ${status} | P&L: $${actualProfit.toFixed(2)}`);
+
     const newExecution = {
-      id: 'temp-' + Date.now(), // Temporary ID for React key
       execution_type: 'trade',
-      status: success ? 'completed' : 'failed',
+      status: status,
       profit_realized: actualProfit,
       gas_used: gasUsed,
-      created_date: new Date().toISOString(),
       details: { 
         opportunity: {
           pair: opportunity.pair,
           buyDex: opportunity.buy_exchange,
           sellDex: opportunity.sell_exchange,
           profitPercentage: opportunity.profit_percentage,
-          netProfitUsd: opportunity.estimated_profit,
-          buyPrice: opportunity.buy_price,
-          sellPrice: opportunity.sell_price,
-          volume: opportunity.volume_available
+          netProfitUsd: actualProfit,
         },
-        tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2),
-        execution_time_ms: Math.floor(Math.random() * 2000) + 500
+        tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2)
       }
     };
     
-    // --- FIXED: Instantly update the UI with the new trade ---
-    setExecutions(prev => [newExecution, ...prev].slice(0, 50));
+    // Instantly update the UI with a temporary ID
+    setExecutions(prev => [{...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
 
-    // --- Update database in the background ---
+    // Update database in the background
     await Promise.all([
-      // Mark the opportunity as executed so we don't trade it again
       base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }),
-      // Save the final execution log to the database
       base44.entities.BotExecution.create(newExecution)
     ]);
     
-    // Update daily stats using functional update
+    // Update daily stats correctly
     setDailyStats(prev => ({
       ...prev,
       trades: prev.trades + 1,
@@ -197,7 +187,7 @@ export default function BotPage() {
       gasUsed: prev.gasUsed + gasUsed
     }));
 
-  }, []); // Removed dependencies that caused re-renders
+  }, [botConfig]);
 
   const runTradingLoop = useCallback(async () => {
     console.log("🔍 Scanning for opportunities...");
@@ -237,12 +227,12 @@ export default function BotPage() {
       const success = await initializeEngine(botConfig);
       if (success) {
         setIsRunning(true);
-        await runTradingLoop(); // Run once immediately
+        await runTradingLoop();
         
         intervalRef.current = setInterval(() => {
           console.log("⏰ Running scheduled scan...");
           runTradingLoop();
-        }, 15000); // Scans every 15 seconds
+        }, 15000);
         
         console.log("✅ Bot started successfully.");
       } else {
@@ -252,7 +242,7 @@ export default function BotPage() {
   };
 
   useEffect(() => {
-    loadHistoricalExecutions(); // Load past executions on page load
+    loadHistoricalExecutions();
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
@@ -292,21 +282,21 @@ export default function BotPage() {
           <Alert className="mb-6 border-amber-200 bg-amber-50">
             <AlertTriangle className="w-4 h-4" />
             <AlertDescription className="text-amber-800">
-              <strong>Bot Offline:</strong> Ensure your environment variables are set and click "Start Bot" to activate live mode.
+              <strong>Bot Offline:</strong> Bot is in "Live Simulation" mode. Click Start to connect to your wallet and begin simulating trades with live data.
             </AlertDescription>
           </Alert>
         ) : (
           <Alert className="mb-6 border-emerald-200 bg-emerald-50">
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
             <AlertDescription className="text-emerald-800">
-              <strong>Live & Connected:</strong> Wallet: <code className="text-xs">{walletAddress}</code>. Bot is operating with live data.
+              <strong>Live & Connected:</strong> Wallet: <code className="text-xs">{walletAddress}</code>. Simulating trades with live market data.
             </AlertDescription>
           </Alert>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Trades Today</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Today's Profit</p><h3 className="text-2xl font-bold text-emerald-600">${dailyStats.profit.toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Simulated Trades</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Simulated P&L</p><h3 className={`text-2xl font-bold ${(dailyStats.profit - dailyStats.loss) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${(dailyStats.profit - dailyStats.loss).toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">MATIC Balance</p><h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3></div><Zap className="w-8 h-8 text-purple-500" /></div></CardContent></Card>
           
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
