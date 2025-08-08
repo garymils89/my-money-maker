@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,7 +113,7 @@ export default function BotPage() {
       console.error("Error fetching balances:", error);
     }
   }, []);
-  
+
   const scanForOpportunities = useCallback(async () => {
     try {
       const opportunities = await base44.entities.ArbitrageOpportunity.list({ 
@@ -133,6 +132,16 @@ export default function BotPage() {
     }
   }, [botConfig]);
   
+  // FIXED: Moved loadInitialData up and wrapped in useCallback
+  const loadInitialData = useCallback(async () => {
+    try {
+      const historicalExecutions = await base44.entities.BotExecution.list({ sort: '-created_date', limit: 1000 });
+      setExecutions(historicalExecutions);
+    } catch (error) {
+      console.error("Could not load historical executions:", error);
+    }
+  }, []);
+
   const executeArbitrage = useCallback(async (opportunity) => {
     console.log(`✅ WOULD EXECUTE LIVE TRADE ON-CHAIN for ${opportunity.pair}`);
     const success = Math.random() > 0.15;
@@ -157,7 +166,9 @@ export default function BotPage() {
       gas_used: (opportunity.gas_estimate || 0.5),
       details: { opportunity, tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2) }
     });
-  }, [dailyStats]);
+    
+    await loadInitialData(); // FIXED: Refresh log after a trade
+  }, [dailyStats, loadInitialData]);
 
   // --- Main Trading Loop ---
   
@@ -168,7 +179,6 @@ export default function BotPage() {
     
     console.log(`Found ${opps.length} opportunities`);
     
-    // FIXED: Added 'created_date' to the scan log object to fix "Invalid Date" issue.
     setExecutions(prev => [{ 
       id: Date.now(), 
       created_date: new Date().toISOString(), 
@@ -177,14 +187,12 @@ export default function BotPage() {
       details: { found: opps.length }
     }, ...prev].slice(0, 50));
     
-    // UPDATED: Use total USDC balance for trade check
     const totalUsdc = nativeUsdcBalance + bridgedUsdcBalance;
     if (opps.length > 0 && totalUsdc >= botConfig.max_position_size) {
       console.log('💎 Executing top opportunity:', opps[0]);
       await executeArbitrage(opps[0]);
-      await loadInitialData(); // Reload log to show new trade
     }
-  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig, loadInitialData]);
+  }, [fetchRealBalances, scanForOpportunities, executeArbitrage, nativeUsdcBalance, bridgedUsdcBalance, botConfig]);
 
   // --- Control Functions ---
 
@@ -205,10 +213,8 @@ export default function BotPage() {
         setIsRunning(true);
         await fetchRealBalances();
         
-        // Run immediately
-        runTradingLoop();
+        await runTradingLoop();
         
-        // FIXED: Set up interval to run every 15 seconds (more frequent for demo)
         intervalRef.current = setInterval(() => {
           console.log("⏰ Running scheduled scan...");
           runTradingLoop();
@@ -221,21 +227,12 @@ export default function BotPage() {
     }
   };
 
-  const loadInitialData = async () => {
-    try {
-      const historicalExecutions = await base44.entities.BotExecution.list({ sort: '-created_date', limit: 1000 });
-      setExecutions(historicalExecutions);
-    } catch (error) {
-      console.error("Could not load historical executions:", error);
-    }
-  };
-
   useEffect(() => {
     loadInitialData();
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [loadInitialData]);
 
   const getStatusColor = () => isRunning ? 'bg-emerald-500' : 'bg-slate-500';
   const getStatusText = () => isRunning ? 'Active' : 'Stopped';
