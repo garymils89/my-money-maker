@@ -16,14 +16,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData();
-    // Refresh every 30 seconds to show live updates
-    const interval = setInterval(loadData, 30000);
+    // Refresh every 10 seconds to show live updates
+    const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
   }, []);
 
   const loadData = async () => {
     try {
-      // Load ALL bot execution data, not fake data
+      // Load ALL bot execution data from the database
       const executionData = await BotExecution.list('-created_date', 1000);
       setExecutions(executionData);
       setLastUpdated(new Date());
@@ -76,6 +76,9 @@ export default function Dashboard() {
       sum + (scan.details?.found || 0), 0
     );
 
+    // Check if bot is currently running
+    const botRunning = localStorage.getItem('arbitragebot_running') === 'true';
+
     return {
       totalPortfolio: 1203.25, // Your actual balance
       portfolioChange: totalProfit > 0 ? 2.1 : -0.5,
@@ -84,9 +87,12 @@ export default function Dashboard() {
       todayProfit,
       profitChange: parseFloat(profitChange.toFixed(1)),
       totalTrades: trades.length,
-      successRate: trades.length > 0 ? (completedTrades.length / trades.length) * 100 : 0
+      successRate: trades.length > 0 ? (completedTrades.length / trades.length) * 100 : 0,
+      botRunning
     };
   };
+
+  const stats = calculateStats(executions);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -123,16 +129,25 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* Show alert about data source */}
-        <Alert className="mb-6 border-emerald-200 bg-emerald-50">
-          <AlertDescription className="text-emerald-800">
-            <strong>Live Bot Data:</strong> This dashboard now shows real data from your bot execution history. 
-            {executions.length > 0 ? `${executions.length} events recorded since you started using the bot.` : 'No bot activity recorded yet - start the bot to begin collecting data.'}
-          </AlertDescription>
-        </Alert>
+        {/* Bot Status Alert */}
+        {stats.botRunning ? (
+          <Alert className="mb-6 border-emerald-200 bg-emerald-50">
+            <AlertDescription className="text-emerald-800">
+              <strong>Bot Status: ACTIVE</strong> - Your trading bot is running and has recorded {executions.length} events. 
+              {stats.totalTrades > 0 ? `Successfully executed ${stats.totalTrades} trades with ${stats.successRate.toFixed(1)}% success rate.` : 'Scanning for profitable opportunities...'}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert className="mb-6 border-amber-200 bg-amber-50">
+            <AlertDescription className="text-amber-800">
+              <strong>Bot Status: STOPPED</strong> - Your trading bot is not currently running. 
+              {executions.length > 0 ? `Historical data shows ${executions.length} recorded events.` : 'No activity recorded yet.'}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Stats Grid */}
-        <StatsGrid stats={calculateStats(executions)} />
+        <StatsGrid stats={stats} />
 
         {/* Main Content Grid */}
         <div className="grid lg:grid-cols-3 gap-6">

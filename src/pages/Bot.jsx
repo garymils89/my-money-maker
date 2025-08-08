@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -291,8 +292,25 @@ export default function BotPage() {
     }
   }, [fetchRealBalances, scanForOpportunities, executeArbitrage, executeFlashloanArbitrage, botConfig, flashloanConfig, recordExecution]);
 
+  // Use localStorage to persist bot state across page changes
+  useEffect(() => {
+    // Check if bot should be running from localStorage
+    const savedBotState = localStorage.getItem('arbitragebot_running');
+    if (savedBotState === 'true') {
+      setIsRunning(true);
+      // It's important to initialize the engine if the bot was previously running,
+      // as component re-mounts would lose the refs.
+      initializeEngine(); 
+    }
+  }, []);
+
+  // Use a more robust background execution method
   useEffect(() => {
     if (isRunning) {
+      // Save bot state to localStorage
+      localStorage.setItem('arbitragebot_running', 'true');
+      
+      // Use setInterval that persists across page changes
       const interval = setInterval(() => {
         runTradingLoop();
       }, 15000);
@@ -301,11 +319,26 @@ export default function BotPage() {
       // Run immediately
       runTradingLoop();
       
+      // Store interval ID globally so other pages can access it
+      window.arbitrageBotInterval = interval;
+      
       return () => {
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
         }
+        // Also clear global interval if component unmounts and it was set by this instance
+        if (window.arbitrageBotInterval === interval) {
+          clearInterval(window.arbitrageBotInterval);
+          delete window.arbitrageBotInterval;
+        }
       };
+    } else {
+      // Bot stopped - clear localStorage
+      localStorage.setItem('arbitragebot_running', 'false');
+      if (window.arbitrageBotInterval) {
+        clearInterval(window.arbitrageBotInterval);
+        delete window.arbitrageBotInterval;
+      }
     }
   }, [isRunning, runTradingLoop]);
 
@@ -313,8 +346,14 @@ export default function BotPage() {
     if (isRunning) {
       setIsRunning(false);
       setIsLive(false);
+      localStorage.setItem('arbitragebot_running', 'false'); // Sync localStorage on stop
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null; // Clear ref
+      }
+      if (window.arbitrageBotInterval) {
+        clearInterval(window.arbitrageBotInterval);
+        delete window.arbitrageBotInterval;
       }
       setWalletAddress(null);
     } else {
@@ -324,6 +363,7 @@ export default function BotPage() {
       const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
+        localStorage.setItem('arbitragebot_running', 'true'); // Sync localStorage on start
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
       }
