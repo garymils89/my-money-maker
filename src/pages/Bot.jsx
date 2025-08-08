@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -159,12 +160,26 @@ export default function BotPage() {
     newDailyStats.gasUsed += (opportunity.gas_estimate || 0.5);
     setDailyStats(newDailyStats);
 
+    // FIXED: Structure the trade details properly so they display in the log
     await base44.entities.BotExecution.create({
       execution_type: 'trade',
       status: success ? 'completed' : 'failed',
       profit_realized: actualProfit,
       gas_used: (opportunity.gas_estimate || 0.5),
-      details: { opportunity, tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2) }
+      details: { 
+        opportunity: {
+          pair: opportunity.pair,
+          buyDex: opportunity.buy_exchange,
+          sellDex: opportunity.sell_exchange,
+          profitPercentage: opportunity.profit_percentage,
+          netProfitUsd: actualProfit,
+          buyPrice: opportunity.buy_price,
+          sellPrice: opportunity.sell_price,
+          volume: opportunity.volume_available
+        },
+        tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2),
+        execution_time_ms: Math.floor(Math.random() * 2000) + 500 // Simulate execution time
+      }
     });
     
     await loadInitialData(); // FIXED: Refresh log after a trade
