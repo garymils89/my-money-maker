@@ -25,9 +25,9 @@ import LeverageManager from "../components/bot/LeverageManager";
 import { base44 } from "@/api/base44Client";
 import { ethers } from "ethers";
 
-// CORRECTED: Defining both native and bridged USDC addresses
-const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d59398A"; // Placeholder for new native USDC (corrected 's' to 'A' for valid hex)
-const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // The old, bridged USDC.e (Polygon USDC)
+// CORRECTED: Using the USDC.e address that contains your actual funds
+const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"; // Your actual USDC.e
+const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // Bridged USDC
 
 const USDC_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
