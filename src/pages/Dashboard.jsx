@@ -1,19 +1,26 @@
-
 import React, { useState, useEffect } from "react";
 import { BotExecution } from "@/api/entities";
 import { motion } from "framer-motion";
-import { RefreshCw, Bell, Settings } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Bot } from "lucide-react";
 
 import StatsGrid from "../components/dashboard/StatsGrid";
 import LiveOpportunities from "../components/dashboard/LiveOpportunities";
 import MarketOverview from "../components/dashboard/MarketOverview";
+import { ethers } from "ethers";
+
+// Wallet details for balance fetching
+const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const USDC_ABI = ["function balanceOf(address owner) view returns (uint256)", "function decimals() view returns (uint8)"];
 
 export default function Dashboard() {
   const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [walletBalance, setWalletBalance] = useState(0);
 
   useEffect(() => {
     loadData();
@@ -22,17 +29,50 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
-    setIsLoading(true); // Set loading state
+  const fetchWalletBalance = async () => {
     try {
-      // Load ALL bot execution data from the database
-      const executionData = await BotExecution.list('-created_date', 1000);
-      setExecutions(executionData);
+      const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
+      const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
+      if (!rpcUrl || !privateKey) return 0;
+      
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const wallet = new ethers.Wallet(privateKey, provider);
+      const address = await wallet.getAddress();
+      
+      const nativeUsdcContract = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, provider);
+      const bridgedUsdcContract = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, provider);
+      
+      const [nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
+        nativeUsdcContract.balanceOf(address),
+        bridgedUsdcContract.balanceOf(address),
+        nativeUsdcContract.decimals(),
+        bridgedUsdcContract.decimals()
+      ]);
+
+      const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
+      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
+      
+      return nativeUsdc + bridgedUsdc;
+    } catch(e) {
+      console.error("Error fetching wallet balance for dashboard:", e);
+      return 0;
+    }
+  };
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [executionData, balance] = await Promise.all([
+        BotExecution.list('-created_date', 1000),
+        fetchWalletBalance()
+      ]);
+      setExecutions(executionData || []);
+      setWalletBalance(balance);
       setLastUpdated(new Date());
     } catch (error) {
       console.error("Error loading execution data:", error);
     } finally {
-      setIsLoading(false); // Unset loading state
+      setIsLoading(false);
     }
   };
 
@@ -43,58 +83,80 @@ export default function Dashboard() {
 
     const completedTrades = trades.filter(e => e.status === 'completed');
     const totalProfit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-
+    const totalTradesCount = trades.length;
+    
     // Today's data
     const today = new Date();
-    const todayTrades = completedTrades.filter(e => {
-      const tradeDate = new Date(e.created_date);
-      return tradeDate.toDateString() === today.toDateString();
-    });
+    today.setHours(0, 0, 0, 0);
+    const todayTrades = completedTrades.filter(e => new Date(e.created_date) >= today);
     const todayProfit = todayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
 
     // Yesterday's data for comparison
-    const yesterday = new Date();
+    const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
     const yesterdayTrades = completedTrades.filter(e => {
       const tradeDate = new Date(e.created_date);
-      return tradeDate.toDateString() === yesterday.toDateString();
+      return tradeDate >= yesterday && tradeDate < today;
     });
     const yesterdayProfit = yesterdayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
 
     // Calculate profit change
     let profitChange = 0;
-    if (yesterdayProfit !== 0) {
-      profitChange = ((todayProfit - yesterdayProfit) / Math.abs(yesterdayProfit)) * 100;
+    if (yesterdayProfit > 0) {
+      profitChange = ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100;
     } else if (todayProfit > 0) {
-      profitChange = 100;
+      profitChange = 100; // Infinite growth if yesterday was 0
     }
 
-    // Active opportunities (recent scans that found opportunities)
-    const recentScans = executions.filter(e =>
-      e.execution_type === 'scan' &&
-      new Date(e.created_date) > new Date(Date.now() - 5 * 60 * 1000) // Last 5 minutes
-    );
-    const activeOpportunities = recentScans.reduce((sum, scan) =>
-      sum + (scan.details?.found || 0), 0
+    // Active opportunities (based on recent trades)
+    const recentProfitableTrades = completedTrades.filter(e =>
+      new Date(e.created_date) > new Date(Date.now() - 15 * 60 * 1000) // Last 15 minutes
     );
 
-    // Check if bot is currently running
-    const botRunning = localStorage.getItem('arbitragebot_running') === 'true';
+    // Best opportunity today
+    const bestOppToday = todayTrades.length > 0
+      ? Math.max(...todayTrades.map(t => t.details?.opportunity?.profitPercentage || 0))
+      : 0;
 
     return {
-      totalPortfolio: 1203.25, // Your actual balance
-      portfolioChange: totalProfit > 0 ? 2.1 : -0.5,
-      activeOpportunities,
-      bestOpportunity: 0.23, // Based on recent scans
+      totalPortfolio: walletBalance,
+      portfolioChange: totalProfit > 0 ? 2.1 : -0.5, // Placeholder
+      activeOpportunities: recentProfitableTrades.length,
+      bestOpportunity: bestOppToday,
       todayProfit,
       profitChange: parseFloat(profitChange.toFixed(1)),
-      totalTrades: trades.length,
-      successRate: trades.length > 0 ? (completedTrades.length / trades.length) * 100 : 0,
-      botRunning
+      totalTrades: totalTradesCount,
+      successRate: totalTradesCount > 0 ? (completedTrades.length / totalTradesCount) * 100 : 0
     };
   };
 
+  const processChartData = (executions) => {
+    const trades = executions.filter(e => e.status === 'completed' && (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'));
+    if (trades.length === 0) return [];
+  
+    const tradesByDay = {};
+    trades.forEach(trade => {
+      const day = new Date(trade.created_date).toLocaleDateString('en-CA'); // YYYY-MM-DD
+      if (!tradesByDay[day]) {
+        tradesByDay[day] = { profit: 0, count: 0 };
+      }
+      tradesByDay[day].profit += trade.profit_realized || 0;
+      tradesByDay[day].count++;
+    });
+  
+    let cumulativeProfit = 0;
+    return Object.keys(tradesByDay).sort().map(day => {
+      cumulativeProfit += tradesByDay[day].profit;
+      return {
+        time: new Date(day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        profit: parseFloat(cumulativeProfit.toFixed(2)),
+        trades: tradesByDay[day].count
+      };
+    });
+  };
+
   const stats = calculateStats(executions);
+  const chartData = processChartData(executions);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -138,16 +200,11 @@ export default function Dashboard() {
               <strong>Loading live bot data...</strong>
             </AlertDescription>
           </Alert>
-        ) : executions.length > 0 ? (
-          <Alert className="mb-6 border-emerald-200 bg-emerald-50">
-            <AlertDescription className="text-emerald-800">
-              <strong>Live Bot Data:</strong> This dashboard now shows real data from your bot execution history.
-            </AlertDescription>
-          </Alert>
         ) : (
-          <Alert className="mb-6 border-amber-200 bg-amber-50">
-            <AlertDescription className="text-amber-800">
-              <strong>No bot activity recorded yet</strong> - start the bot to begin collecting data.
+          <Alert className="mb-6 border-emerald-200 bg-emerald-50">
+            <Bot className="w-4 h-4" />
+            <AlertDescription className="text-emerald-800">
+              <strong>Live Bot Data:</strong> This dashboard now shows real performance from your bot's execution history.
             </AlertDescription>
           </Alert>
         )}
@@ -158,7 +215,7 @@ export default function Dashboard() {
         {/* Main Content Grid */}
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
-            <MarketOverview data={executions} />
+            <MarketOverview data={chartData} />
           </div>
           <div>
             <LiveOpportunities executions={executions} />
