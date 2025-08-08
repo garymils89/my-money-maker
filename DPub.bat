@@ -8,7 +8,7 @@ git commit -m "code upgrade"
 if %errorlevel% neq 0 goto :error
 
 echo Pushing to origin master...
-git push origin master
+git push origin develop
 if %errorlevel% neq 0 goto :error
 
 echo Success! All changes pushed.
