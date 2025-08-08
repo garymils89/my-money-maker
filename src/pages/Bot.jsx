@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -63,7 +62,6 @@ export default function BotPage() {
   const nativeUsdcContractRef = useRef(null);
   const bridgedUsdcContractRef = useRef(null);
   const intervalRef = useRef(null);
-  // CORE FIX: Use a ref to track traded IDs, which is stable across re-renders and not stale in intervals.
   const tradedOpportunityIdsRef = useRef(new Set());
 
   const initializeEngine = useCallback(async () => {
@@ -135,7 +133,6 @@ export default function BotPage() {
         sort: '-profit_percentage',
         limit: 10 
       });
-      // CORE FIX: Use the ref to get the latest list of traded IDs.
       const untradedOpportunities = opportunities.filter(opp => !tradedOpportunityIdsRef.current.has(opp.id));
       
       return untradedOpportunities.filter(opp => {
@@ -149,22 +146,28 @@ export default function BotPage() {
   }, [botConfig]);
 
   const executeFlashloanArbitrage = useCallback(async (opportunity, config) => {
+    console.log(`🚀 EXECUTING FLASHLOAN: $${config.amount.toLocaleString()} at ${opportunity.profit_percentage.toFixed(2)}% profit`);
+    
+    // Calculate potential profits
     const grossProfit = config.amount * (opportunity.profit_percentage / 100);
     const loanFee = config.amount * (config.fee_percentage / 100);
     const netProfit = grossProfit - loanFee;
 
+    // Update simulation result for UI
     setLastFlashloanSim({ grossProfit, loanFee, netProfit });
 
     if (netProfit <= 0) {
-      console.log(`Flashloan unprofitable for opp ${opportunity.id}. Net: ${netProfit.toFixed(2)}`);
+      console.log(`❌ Flashloan unprofitable for opp ${opportunity.id}. Net: ${netProfit.toFixed(2)}`);
       return;
     }
 
+    // Mark opportunity as traded
     tradedOpportunityIdsRef.current.add(opportunity.id);
     base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
-    const status = Math.random() > 0.1 ? 'completed' : 'failed'; // 90% success rate
-    const profitRealized = status === 'completed' ? netProfit * (0.9 + Math.random() * 0.1) : -loanFee; // simulate some variance
+    // Simulate execution (90% success rate)
+    const status = Math.random() > 0.1 ? 'completed' : 'failed';
+    const profitRealized = status === 'completed' ? netProfit * (0.9 + Math.random() * 0.1) : -loanFee;
 
     const newExecution = {
       execution_type: 'flashloan_trade',
@@ -176,29 +179,34 @@ export default function BotPage() {
           buyDex: opportunity.buy_exchange,
           sellDex: opportunity.sell_exchange,
           profitPercentage: opportunity.profit_percentage,
+          netProfitUsd: profitRealized,
         },
         loanAmount: config.amount,
         loanFee: loanFee,
-        tx_hash: '0xSIMULATED_FLASHLOAN_' + ethers.hexlify(ethers.randomBytes(26)).substring(2)
+        provider: config.provider,
+        tx_hash: '0xFLASH_' + ethers.hexlify(ethers.randomBytes(26)).substring(2)
       }
     };
 
+    // Update UI immediately
     setExecutions(prev => [{ ...newExecution, id: 'temp-' + Date.now(), created_date: new Date().toISOString() }, ...prev].slice(0, 50));
+    
+    // Save to database
     base44.entities.BotExecution.create(newExecution).catch(err => console.error(err));
 
+    // Update daily stats
     setDailyStats(prev => ({
       ...prev,
       trades: prev.trades + 1,
       profit: prev.profit + (status === 'completed' ? profitRealized : 0),
       loss: prev.loss + (status === 'failed' ? Math.abs(profitRealized) : 0),
     }));
+
+    console.log(`✅ FLASHLOAN ${status.toUpperCase()}: ${status === 'completed' ? '+' : ''}$${profitRealized.toFixed(2)}`);
   }, []);
 
   const executeArbitrage = useCallback(async (opportunity) => {
-    // CORE FIX: Add the new ID to the ref immediately.
     tradedOpportunityIdsRef.current.add(opportunity.id);
-
-    // Mark as executed in the database in the background
     base44.entities.ArbitrageOpportunity.update(opportunity.id, { status: 'executed' }).catch(err => console.error(err));
 
     const success = Math.random() > 0.15;
@@ -221,7 +229,7 @@ export default function BotPage() {
           profitPercentage: opportunity.profit_percentage,
           netProfitUsd: actualProfit,
         },
-        tx_hash: '0xSIMULATED_' + ethers.hexlify(ethers.randomBytes(30)).substring(2)
+        tx_hash: '0xREG_' + ethers.hexlify(ethers.randomBytes(30)).substring(2)
       }
     };
     
@@ -236,33 +244,41 @@ export default function BotPage() {
       gasUsed: prev.gasUsed + gasUsed
     }));
 
-  }, []); // CORE FIX: Keep this dependency array empty so the function is stable.
+  }, []);
 
   const runTradingLoop = useCallback(async () => {
     const { totalUsdc } = await fetchRealBalances();
     const opps = await scanForOpportunities();
     
+    // Log scan results
     setExecutions(prev => [{ 
       id: Date.now(), 
       created_date: new Date().toISOString(), 
       execution_type: 'scan', 
       status: 'completed', 
-      details: { found: opps.length, total_traded_this_session: tradedOpportunityIdsRef.current.size }
+      details: { 
+        found: opps.length, 
+        total_traded_this_session: tradedOpportunityIdsRef.current.size,
+        flashloan_enabled: flashloanConfig?.enabled || false
+      }
     }, ...prev].slice(0, 50));
     
     if (opps.length > 0) {
       const topOpp = opps[0];
-      // Prefer flashloan if configured and profitable
+      
+      // PRIORITIZE FLASHLOAN if configured and profitable
       if (flashloanConfig && flashloanConfig.enabled) {
         const potentialGrossProfit = flashloanConfig.amount * (topOpp.profit_percentage / 100);
         const potentialLoanFee = flashloanConfig.amount * (flashloanConfig.fee_percentage / 100);
-        if (potentialGrossProfit > potentialLoanFee) {
+        const potentialNetProfit = potentialGrossProfit - potentialLoanFee;
+        
+        if (potentialNetProfit > 5) { // Must be at least $5 profit to justify flashloan
           await executeFlashloanArbitrage(topOpp, flashloanConfig);
-          return; // End loop after flashloan attempt
+          return; // Exit after flashloan attempt
         }
       }
       
-      // Fallback to regular trade if flashloan is not viable or profitable
+      // Fallback to regular trade if flashloan not viable
       if (totalUsdc >= botConfig.max_position_size) {
         await executeArbitrage(topOpp);
       }
@@ -279,13 +295,12 @@ export default function BotPage() {
       }
       setWalletAddress(null);
     } else {
-      // CORE FIX: Reset the traded IDs ref each time the bot starts.
       tradedOpportunityIdsRef.current = new Set();
-      setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 }); // Reset stats
+      setDailyStats({ trades: 0, profit: 0, loss: 0, gasUsed: 0 });
       const success = await initializeEngine();
       if (success) {
         setIsRunning(true);
-        await runTradingLoop(); // Run immediately on start
+        await runTradingLoop();
         intervalRef.current = setInterval(runTradingLoop, 15000);
       } else {
         alert("LIVE MODE FAILED: Check console for errors. Ensure your environment variables are set correctly.");
@@ -318,6 +333,12 @@ export default function BotPage() {
               <div className="flex items-center gap-2 mt-1">
                 <div className={`w-2 h-2 rounded-full ${getStatusColor()} ${isRunning ? 'animate-pulse' : ''}`} />
                 <span className="text-slate-600">{getStatusText()}</span>
+                {flashloanConfig?.enabled && isRunning && (
+                  <Badge className="bg-purple-100 text-purple-800">
+                    <Zap className="w-3 h-3 mr-1" />
+                    Flashloan ${flashloanConfig.amount.toLocaleString()}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
@@ -338,26 +359,26 @@ export default function BotPage() {
             </AlertDescription>
           </Alert>
         ) : (
-          <Alert className="mb-6 border-blue-200 bg-blue-50">
-            <ShieldCheck className="w-4 h-4 text-blue-700" />
-            <AlertDescription className="text-blue-800">
-              <strong>Connected & Analyzing:</strong> Wallet <code className="text-xs">{walletAddress}</code> connected. 
-              Using real balance (${(nativeUsdcBalance + bridgedUsdcBalance).toFixed(2)}) and live market data. 
-              <strong>Transactions are simulated</strong> - no funds spent during testing phase.
+          <Alert className="mb-6 border-purple-200 bg-purple-50">
+            <Zap className="w-4 h-4 text-purple-700" />
+            <AlertDescription className="text-purple-800">
+              <strong>Flashloan Mode Active:</strong> Bot will attempt flashloan trades with ${flashloanConfig?.amount.toLocaleString() || '25,000'} 
+              when opportunities exceed profit thresholds. Wallet <code className="text-xs">{walletAddress}</code> connected.
+              <strong> All transactions are simulated</strong> - no real funds at risk during testing.
             </AlertDescription>
           </Alert>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Simulated Trades</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Simulated P&L</p><h3 className={`text-2xl font-bold ${(dailyStats.profit - dailyStats.loss) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${(dailyStats.profit - dailyStats.loss).toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Trades Today</p><h3 className="text-2xl font-bold text-slate-900">{dailyStats.trades}</h3></div><Activity className="w-8 h-8 text-blue-500" /></div></CardContent></Card>
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">Net P&L</p><h3 className={`text-2xl font-bold ${(dailyStats.profit - dailyStats.loss) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${(dailyStats.profit - dailyStats.loss).toFixed(2)}</h3></div><TrendingUp className="w-8 h-8 text-emerald-500" /></div></CardContent></Card>
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-600">MATIC Balance</p><h3 className="text-2xl font-bold text-purple-600">{maticBalance.toFixed(4)}</h3></div><Zap className="w-8 h-8 text-purple-500" /></div></CardContent></Card>
           
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-600">Total USDC Balance</p>
+                  <p className="text-sm text-slate-600">USDC Balance</p>
                   <h3 className="text-2xl font-bold text-orange-600">
                     ${(nativeUsdcBalance + bridgedUsdcBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                   </h3>
@@ -377,7 +398,7 @@ export default function BotPage() {
               <TabsTrigger value="dashboard" className="flex items-center gap-2"><Activity className="w-4 h-4" />Dashboard</TabsTrigger>
               <TabsTrigger value="config" className="flex items-center gap-2"><Settings className="w-4 h-4" />Configuration</TabsTrigger>
               <TabsTrigger value="risk" className="flex items-center gap-2"><Shield className="w-4 h-4" />Risk Controls</TabsTrigger>
-              <TabsTrigger value="leverage" className="flex items-center gap-2"><TrendingUp className="w-4 h-4" />Leverage</TabsTrigger>
+              <TabsTrigger value="leverage" className="flex items-center gap-2"><Zap className="w-4 h-4" />Flashloans</TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="dashboard"><BotExecutionLog executions={executions} /></TabsContent>
