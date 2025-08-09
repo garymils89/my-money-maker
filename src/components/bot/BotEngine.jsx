@@ -1,3 +1,4 @@
+
 import { ethers } from "ethers";
 import { botStateManager } from "./botState";
 import { BotExecution } from "@/api/entities";
@@ -117,23 +118,24 @@ class Engine {
         // Placeholder for future arbitrage logic
     }
 
-    botStateManager.addExecution({
-      client_id: `scan-${Date.now()}`,
+    const scanData = {
       execution_type: 'scan',
       strategy_type: 'system',
       status: 'completed',
       details: { message: 'Market scan completed' }
+    };
+    botStateManager.addExecution({
+      client_id: `scan-${Date.now()}`,
+      ...scanData
     });
+    // Scans are not critical to save to DB, so we skip BotExecution.create()
   }
 
   async _executeFlashloanTrade() {
-    const tradeId = `trade-${Date.now()}`;
-    
     const profit = (Math.random() * 50 - 5);
     const success = profit > this.strategies.flashloan.config.min_profit_threshold;
 
-    botStateManager.addExecution({
-      client_id: tradeId,
+    const executionData = {
       execution_type: 'flashloan_trade',
       strategy_type: 'flashloan',
       status: success ? 'completed' : 'failed',
@@ -143,9 +145,33 @@ class Engine {
         opportunity: { buyDex: 'Uniswap', sellDex: 'QuickSwap', pair: 'USDC/USDT' },
         loanAmount: this.strategies.flashloan.config.flashloanAmount,
         loanFee: this.strategies.flashloan.config.flashloanAmount * 0.0009,
-        tx_hash: success ? `0x${Math.random().toString(16).substr(2, 40)}` : null
-      }
+        tx_hash: success ? `0x${Math.random().toString(16).substring(2, 42)}` : null
+      },
+      bot_config_id: 'simulated_bot_1',
+      opportunity_id: `opp-${Date.now()}`
+    };
+
+    // Add to live feed for immediate UI update
+    botStateManager.addExecution({
+      client_id: `trade-${Date.now()}`,
+      ...executionData
     });
+    
+    try {
+      console.log('--- ATTEMPTING TO SAVE TO DATABASE ---', executionData);
+      const savedRecord = await BotExecution.create(executionData);
+      console.log('--- ✅ SUCCESS: Record saved to database! ---', savedRecord);
+    } catch (error) { // FIX: Changed (error: any) to (error) for valid JavaScript
+      console.error('--- ❌ FAILED TO SAVE TO DATABASE! ---', error);
+      // Also add an error execution to the live feed so it's visible in the UI
+      botStateManager.addExecution({
+        client_id: `error-${Date.now()}`,
+        execution_type: 'error',
+        strategy_type: 'system',
+        status: 'failed',
+        details: { message: 'Failed to save execution to database.', error: (error instanceof Error) ? error.message : String(error) }
+      });
+    }
 
     console.log(`💰 Flashloan Trade executed: ${success ? 'SUCCESS' : 'FAILED'} - $${profit.toFixed(2)}`);
   }
