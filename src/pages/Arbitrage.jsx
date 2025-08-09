@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Play, Pause } from "lucide-react";
-import { botStateManager, BotEngine } from "../components/bot/botState";
+import botEngine from "@/components/bot/BotEngine";
+import { botStateManager } from "@/components/bot/botState";
 import LiveActivityFeed from "../components/bot/LiveActivityFeed";
 import StrategyConfig from "../components/bot/StrategyConfig";
 import { Badge } from "@/components/ui/badge";
 
 export default function ArbitragePage() {
-  const [isRunning, setIsRunning] = useState(botStateManager.isStrategyRunning('arbitrage'));
+  const [isRunning, setIsRunning] = useState(false);
   const [executions, setExecutions] = useState([]);
   const [config, setConfig] = useState({
     min_profit_threshold: 0.2,
@@ -16,32 +17,31 @@ export default function ArbitragePage() {
   });
   
   useEffect(() => {
-    // Initialize the bot engine with the current config when the component mounts
-    BotEngine.updateConfig('arbitrage', config);
+    const initialStatus = botStateManager.getState().activeStrategies.arbitrage;
+    setIsRunning(initialStatus);
+    
+    botEngine.updateConfig('arbitrage', config);
 
-    // Subscribe to bot state changes
     const handleStateChange = (state) => {
       setIsRunning(state.activeStrategies.arbitrage);
-      // Filter executions relevant to the arbitrage strategy or general alerts/errors
       setExecutions(state.executions.filter(e => e.strategy_type === 'arbitrage' || e.execution_type === 'alert' || e.execution_type === 'error'));
     };
     const unsubscribe = botStateManager.subscribe(handleStateChange);
     
-    // Cleanup subscription on component unmount
     return () => unsubscribe();
-  }, []); // Empty dependency array means this effect runs only once on mount
+  }, []);
 
   const handleToggle = () => {
     if (isRunning) {
-      BotEngine.stop('arbitrage');
+      botEngine.stop('arbitrage');
     } else {
-      BotEngine.start('arbitrage');
+      botEngine.start('arbitrage');
     }
   };
 
   const handleConfigChange = (newConfig) => {
-    setConfig(newConfig); // Update local state
-    BotEngine.updateConfig('arbitrage', newConfig); // Push new config to the bot engine
+    setConfig(newConfig);
+    botEngine.updateConfig('arbitrage', newConfig);
   };
 
   return (
@@ -68,7 +68,7 @@ export default function ArbitragePage() {
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="space-y-6"> {/* New div to group cards with vertical spacing */}
+            <div className="space-y-6">
                 <Card>
                     <CardHeader>
                         <CardTitle>Strategy Overview</CardTitle>

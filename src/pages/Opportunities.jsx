@@ -1,89 +1,80 @@
-import React, { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import React, { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { 
+import {
   Rocket,
   CheckCircle,
   AlertTriangle,
-  Settings,
-  Globe,
-  Shield,
-  Download,
-  ExternalLink
+  PlayCircle,
+  PauseCircle,
+  Timer,
+  DollarSign,
+  Hash
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { botStateManager, BotEngine } from "@/components/bot/botState";
+import { formatDistanceToNowStrict } from 'date-fns';
 
-export default function Opportunities() {
-  const [deploymentStep, setDeploymentStep] = useState(1);
-  const [isDeploying, setIsDeploying] = useState(false);
+export default function DeployPage() {
+  const [isLive, setIsLive] = useState(false);
+  const [runStartTime, setRunStartTime] = useState(null);
+  const [elapsedTime, setElapsedTime] = useState('0s');
+  const [stats, setStats] = useState({ trades: 0, profit: 0 });
+  const [config] = useState(BotEngine.strategies.flashloan.config); // Lock in config at page load
 
-  const deploymentSteps = [
-    {
-      id: 1,
-      title: "Environment Setup",
-      description: "Configure your production environment variables",
-      status: "pending",
-      details: [
-        "Set up Polygon mainnet RPC endpoint",
-        "Configure wallet private key securely",
-        "Set gas price and limit parameters",
-        "Enable production logging"
-      ]
-    },
-    {
-      id: 2,
-      title: "Smart Contract Deployment", 
-      description: "Deploy flashloan contracts to Polygon",
-      status: "pending",
-      details: [
-        "Deploy flashloan aggregator contract",
-        "Set up DEX router connections",
-        "Configure lending pool addresses",
-        "Test contract interactions"
-      ]
-    },
-    {
-      id: 3,
-      title: "Bot Configuration",
-      description: "Set production trading parameters",
-      status: "pending",
-      details: [
-        "Set conservative profit thresholds",
-        "Configure safety limits",
-        "Set up monitoring alerts",
-        "Enable emergency stop mechanisms"
-      ]
-    },
-    {
-      id: 4,
-      title: "Go Live",
-      description: "Launch your bot with real funds",
-      status: "pending",
-      details: [
-        "Start with minimal capital",
-        "Monitor first trades closely",
-        "Gradually increase position sizes",
-        "Scale based on performance"
-      ]
+  useEffect(() => {
+    const unsubscribe = botStateManager.subscribe(state => {
+      const flashloanRunning = state.activeStrategies.flashloan;
+      setIsLive(flashloanRunning);
+
+      if (flashloanRunning && !runStartTime) {
+        setRunStartTime(new Date());
+      } else if (!flashloanRunning && runStartTime) {
+        setRunStartTime(null);
+      }
+      
+      const flashloanTrades = state.executions.filter(
+        e => e.strategy_type === 'flashloan' && e.status === 'completed'
+      );
+      
+      const totalProfit = flashloanTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
+      
+      setStats({
+          trades: flashloanTrades.length,
+          profit: totalProfit
+      });
+    });
+
+    return unsubscribe;
+  }, [runStartTime]);
+
+  useEffect(() => {
+    let timerInterval;
+    if (runStartTime) {
+      timerInterval = setInterval(() => {
+        setElapsedTime(formatDistanceToNowStrict(runStartTime));
+      }, 1000);
     }
-  ];
+    return () => clearInterval(timerInterval);
+  }, [runStartTime]);
 
-  const handleDeploy = () => {
-    setIsDeploying(true);
-    // Simulate deployment process
-    setTimeout(() => {
-      setIsDeploying(false);
-      alert("Deployment simulation completed! In production, this would deploy your contracts and start the live bot.");
-    }, 3000);
+  const handleToggleProductionRun = () => {
+    if (isLive) {
+      BotEngine.stop('flashloan');
+    } else {
+      // Use the locked-in config for the production run
+      BotEngine.updateConfig('flashloan', config);
+      BotEngine.start('flashloan');
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
@@ -93,120 +84,97 @@ export default function Opportunities() {
               <Rocket className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Deploy to Production
+              Production Deployment
             </h1>
           </div>
           <p className="text-xl text-slate-600 font-medium">
-            Launch your arbitrage bot on Polygon mainnet with real funds
+            Start and monitor your live flashloan trading bot evaluation.
           </p>
         </motion.div>
 
-        {/* Current Status Alert */}
-        <Alert className="mb-8 border-amber-200 bg-amber-50">
+        {/* CRITICAL WARNING */}
+        <Alert variant="destructive" className="mb-8 shadow-lg">
           <AlertTriangle className="w-4 h-4" />
-          <AlertDescription className="text-amber-800">
-            <strong>Demo Mode:</strong> This deployment wizard is for educational purposes. 
-            Real production deployment requires additional security measures and testing.
+          <AlertDescription className="font-semibold">
+            To keep the bot running, you must leave this browser tab open and your computer awake. Closing this tab will stop the production run.
           </AlertDescription>
         </Alert>
 
-        {/* Deployment Steps */}
-        <div className="space-y-6 mb-8">
-          {deploymentSteps.map((step, index) => (
-            <motion.div
-              key={step.id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <Card className={`bg-white/80 backdrop-blur-sm border-0 shadow-lg ${
-                deploymentStep === step.id ? 'ring-2 ring-orange-200' : ''
-              }`}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        step.status === 'completed' ? 'bg-emerald-100' :
-                        deploymentStep === step.id ? 'bg-orange-100' : 'bg-slate-100'
-                      }`}>
-                        {step.status === 'completed' ? (
-                          <CheckCircle className="w-5 h-5 text-emerald-600" />
-                        ) : (
-                          <span className="font-bold text-sm">{step.id}</span>
-                        )}
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold">{step.title}</h3>
-                        <p className="text-sm text-slate-600">{step.description}</p>
-                      </div>
-                    </div>
-                    <Badge variant={
-                      step.status === 'completed' ? 'default' :
-                      deploymentStep === step.id ? 'secondary' : 'outline'
-                    }>
-                      {step.status === 'completed' ? 'Complete' :
-                       deploymentStep === step.id ? 'Active' : 'Pending'}
-                    </Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2">
-                    {step.details.map((detail, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                        <div className="w-2 h-2 rounded-full bg-slate-300" />
-                        {detail}
-                      </li>
-                    ))}
-                  </ul>
-                  {deploymentStep === step.id && (
-                    <div className="mt-4 flex gap-3">
-                      <Button 
-                        size="sm"
-                        onClick={() => setDeploymentStep(step.id + 1)}
-                        disabled={step.id === 4}
-                      >
-                        {step.id === 4 ? 'Ready to Deploy' : 'Next Step'}
-                      </Button>
-                      {step.id === 4 && (
-                        <Button 
-                          size="sm" 
-                          variant="destructive"
-                          onClick={handleDeploy}
-                          disabled={isDeploying}
-                        >
-                          {isDeploying ? 'Deploying...' : '🚀 Deploy Live Bot'}
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Resources */}
-        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+        {/* Control Panel */}
+        <Card className="mb-8 bg-white/80 backdrop-blur-sm shadow-lg">
           <CardHeader>
-            <CardTitle>Deployment Resources</CardTitle>
+            <CardTitle>Master Control Panel</CardTitle>
+            <CardDescription>Use this button to start or stop the entire production run.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid md:grid-cols-3 gap-4">
-              <Button variant="outline" className="flex items-center gap-2">
-                <Download className="w-4 h-4" />
-                Download Config
-              </Button>
-              <Button variant="outline" className="flex items-center gap-2">
-                <Globe className="w-4 h-4" />
-                Mainnet Guide
-              </Button>
-              <Button variant="outline" className="flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                Security Checklist
-              </Button>
-            </div>
+          <CardContent className="flex flex-col items-center gap-6">
+             <Badge className={`text-lg px-4 py-2 ${isLive ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                Status: {isLive ? "LIVE" : "OFFLINE"}
+            </Badge>
+            <Button
+              onClick={handleToggleProductionRun}
+              className={`w-full max-w-sm h-16 text-xl font-bold transition-all duration-300 ${isLive ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
+            >
+              {isLive ? (
+                <><PauseCircle className="w-8 h-8 mr-3" /> Stop Production Run</>
+              ) : (
+                <><PlayCircle className="w-8 h-8 mr-3" /> Start Production Run</>
+              )}
+            </Button>
           </CardContent>
         </Card>
+
+        {/* Live Stats & Config */}
+        <div className="grid md:grid-cols-2 gap-8">
+            <Card className="bg-white/80 backdrop-blur-sm shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Timer /> Live Run Statistics</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 text-lg">
+                    <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Time Elapsed:</span>
+                        <span className="font-bold text-slate-900">{elapsedTime}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Completed Trades:</span>
+                        <span className="font-bold text-slate-900">{stats.trades}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-slate-600">Total P&L:</span>
+                        <span className={`font-bold ${stats.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            ${stats.profit.toFixed(2)}
+                        </span>
+                    </div>
+                </CardContent>
+            </Card>
+            
+            <Card className="bg-white/80 backdrop-blur-sm shadow-lg">
+                <CardHeader>
+                    <CardTitle>Locked-in Configuration</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Min Profit:</span>
+                        <Badge variant="outline">{config.min_profit_threshold}%</Badge>
+                    </div>
+                     <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Loan Amount:</span>
+                        <Badge variant="outline">${config.flashloanAmount.toLocaleString()}</Badge>
+                    </div>
+                     <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Provider:</span>
+                        <Badge variant="outline" className="capitalize">{config.loanProvider}</Badge>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Loss Limit:</span>
+                        <Badge variant="outline">${config.dailyLossLimit}</Badge>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Max Slippage:</span>
+                        <Badge variant="outline">{config.maxSlippage}%</Badge>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
       </div>
     </div>
   );

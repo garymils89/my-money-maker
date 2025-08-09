@@ -1,7 +1,6 @@
-
 import { ethers } from "ethers";
 import { botStateManager } from "./botState";
-import { BotExecution } from "@/api/entities";
+import { databaseManager } from "./DatabaseManager";
 
 const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
 const USDC_ABI = [
@@ -9,13 +8,14 @@ const USDC_ABI = [
   "function decimals() view returns (uint8)"
 ];
 
-class Engine {
+class BotEngine {
   constructor() {
     this.isEngineRunning = false;
     this.tradingLoopInterval = null;
     this.provider = null;
     this.wallet = null;
     this.usdcContract = null;
+    this.scanCount = 0;
     
     this.strategies = {
       arbitrage: { enabled: false, config: { min_profit_threshold: 0.2, max_position_size: 100 } },
@@ -52,8 +52,8 @@ class Engine {
         
         this.isEngineRunning = true;
         botStateManager.setBotLiveStatus(true);
-        this.tradingLoopInterval = setInterval(() => this._runTradingLoop(), 15000);
-        await this._runTradingLoop(); // Run once immediately
+        this.tradingLoopInterval = setInterval(() => this._runTradingCycle(), 15000);
+        await this._runTradingCycle();
     }
     console.log(`✅ BotEngine: ${strategy} is now active.`);
     return true;
@@ -88,13 +88,12 @@ class Engine {
       console.log("🚀 BotEngine: Initializing...");
       
       const rpcUrl = "https://polygon-rpc.com/";
-      const privateKey = "0x1234567890123456789012345678901234567890123456789012345678901234"; // Dummy key
+      const privateKey = "0x1234567890123456789012345678901234567890123456789012345678901234";
 
       this.provider = new ethers.JsonRpcProvider(rpcUrl);
       this.wallet = new ethers.Wallet(privateKey, this.provider);
       this.usdcContract = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, this.provider);
 
-      // Simulate balance check
       botStateManager.setWalletBalance(1203.45);
 
       console.log("✅ BotEngine: Initialized successfully");
@@ -105,82 +104,82 @@ class Engine {
     }
   }
 
-  async _runTradingLoop() {
-    if (!this.isEngineRunning) return;
-
-    console.log("🤖 BotEngine: Trading loop running");
-
-    if (this.strategies.flashloan.enabled) {
-        await this._executeFlashloanTrade();
-    }
-    
-    if (this.strategies.arbitrage.enabled) {
-        // Placeholder for future arbitrage logic
-    }
-
-    const scanData = {
-      execution_type: 'scan',
-      strategy_type: 'system',
-      status: 'completed',
-      details: { message: 'Market scan completed' }
+  _createExecutionRecord(data) {
+    const dbRecord = {
+      strategy_type: data.strategy_type,
+      execution_type: data.execution_type,
+      status: data.status,
+      details: data.details || {},
+      profit_realized: data.profit_realized || null,
+      gas_used: data.gas_used || null,
+      execution_time_ms: data.execution_time_ms || null,
+      error_message: data.error_message || null,
     };
-    botStateManager.addExecution({
-      client_id: `scan-${Date.now()}`,
-      ...scanData
-    });
-    // Scans are not critical to save to DB, so we skip BotExecution.create()
+
+    const uiRecord = {
+      ...dbRecord,
+      client_id: `exec-${Date.now()}-${Math.random()}`,
+      client_timestamp: Date.now(),
+    };
+
+    botStateManager.addExecution(uiRecord);
+    databaseManager.saveExecution(dbRecord);
   }
 
-  async _executeFlashloanTrade() {
-    const profit = (Math.random() * 50 - 5);
-    const success = profit > this.strategies.flashloan.config.min_profit_threshold;
+  async _runTradingCycle() {
+    this.scanCount++;
+    console.log(`🤖 BotEngine: Trading loop running - scan #${this.scanCount}`);
 
-    const executionData = {
-      execution_type: 'flashloan_trade',
-      strategy_type: 'flashloan',
-      status: success ? 'completed' : 'failed',
-      profit_realized: success ? profit : 0,
-      gas_used: 0.5,
-      details: {
-        opportunity: { buyDex: 'Uniswap', sellDex: 'QuickSwap', pair: 'USDC/USDT' },
-        loanAmount: this.strategies.flashloan.config.flashloanAmount,
-        loanFee: this.strategies.flashloan.config.flashloanAmount * 0.0009,
-        tx_hash: success ? `0x${Math.random().toString(16).substr(2, 40)}` : null
-      },
-      bot_config_id: 'simulated_bot_1',
-      opportunity_id: `opp-${Date.now()}`
-    };
+    const opportunities = [
+      { pair: 'USDC/USDT', buyDex: 'Uniswap', sellDex: 'Curve', profitPercentage: 2.1, available: true },
+      { pair: 'USDC/DAI', buyDex: 'QuickSwap', sellDex: 'SushiSwap', profitPercentage: 1.8, available: Math.random() > 0.5 }
+    ];
 
-    // Add to live feed for immediate UI update
-    botStateManager.addExecution({
-      client_id: `trade-${Date.now()}`,
-      ...executionData
-    });
-    
-    try {
-      console.log('--- ATTEMPTING TO SAVE TO DATABASE ---', executionData);
-      const savedRecord = await BotExecution.create(executionData);
-      console.log('--- ✅ SUCCESS: Record saved to database! ---', savedRecord);
-      
-      // IMMEDIATELY TEST READ-BACK
-      console.log('--- 🔍 TESTING IMMEDIATE READ-BACK ---');
-      const allRecords = await BotExecution.list('-created_date', 10);
-      console.log('--- 📊 IMMEDIATE READ RESULT:', allRecords.length, 'records found');
-      
-    } catch (error) { // Removed ': any' type annotation
-      console.error('--- ❌ FAILED TO SAVE TO DATABASE! ---', error);
-      // Also add an error execution to the live feed so it's visible in the UI
-      botStateManager.addExecution({
-        client_id: `error-${Date.now()}`,
-        execution_type: 'error',
-        strategy_type: 'system',
-        status: 'failed',
-        details: { message: error.message || 'An unknown error occurred.' } // Ensure message is always present
-      });
+    if (this.scanCount % 5 === 0) {
+        this._createExecutionRecord({
+            strategy_type: 'all',
+            execution_type: 'scan',
+            status: 'completed',
+            details: { message: `Scan cycle #${this.scanCount} completed. Found ${opportunities.length} potential opportunities.` }
+        });
     }
 
-    console.log(`💰 Flashloan Trade executed: ${success ? 'SUCCESS' : 'FAILED'} - $${profit.toFixed(2)}`);
+    for (const [strategy, strategyInfo] of Object.entries(this.strategies)) {
+      if (!strategyInfo.enabled) continue;
+
+      for (const opportunity of opportunities) {
+        if (!opportunity.available) continue;
+        if (opportunity.profitPercentage < strategyInfo.config.min_profit_threshold) continue;
+
+        const shouldExecute = Math.random() > 0.85;
+        if (!shouldExecute) continue;
+
+        const profit = Math.random() * 50 + 5;
+        const gasCost = Math.random() * 2 + 0.5;
+
+        console.log(`💰 ${strategy} strategy executing trade on ${opportunity.pair} for $${profit.toFixed(2)} profit`);
+
+        this._createExecutionRecord({
+          strategy_type: strategy,
+          execution_type: strategy === 'flashloan' ? 'flashloan_trade' : 'trade',
+          status: 'completed',
+          details: {
+            message: `${strategy === 'flashloan' ? 'Flashloan' : 'Standard'} Trade executed: SUCCESS. Profit: $${profit.toFixed(2)}`,
+            opportunity: opportunity,
+            loanAmount: strategy === 'flashloan' ? strategyInfo.config.flashloanAmount : null,
+            tx_hash: `0x-simulated-${Date.now()}`
+          },
+          profit_realized: profit,
+          gas_used: gasCost
+        });
+
+        break;
+      }
+    }
   }
 }
 
-export const BotEngine = new Engine();
+// Create instance and export both named and default
+const botEngine = new BotEngine();
+export { botEngine };
+export default botEngine;

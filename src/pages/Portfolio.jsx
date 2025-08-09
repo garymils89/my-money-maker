@@ -1,256 +1,376 @@
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { BotExecution } from "@/api/entities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
-import { TrendingUp, TrendingDown, Wallet, Plus, ArrowUpRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Database, Download, ExternalLink, Calendar as CalendarIcon, FileText, TrendingUp } from "lucide-react";
 import { motion } from "framer-motion";
+import { format, addDays } from 'date-fns';
+import { botStateManager } from "@/components/bot/botState";
+
+const StatusBadge = ({ status }) => {
+  const styles = {
+    completed: 'bg-emerald-100 text-emerald-800',
+    failed: 'bg-red-100 text-red-800',
+    executing: 'bg-blue-100 text-blue-800',
+    default: 'bg-slate-100 text-slate-800',
+  };
+  const text = status || 'unknown';
+  return <Badge className={styles[status] || styles.default}>{text}</Badge>;
+};
 
 export default function Portfolio() {
-  const [portfolio, setPortfolio] = useState([]);
-  const [trades, setTrades] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [executions, setExecutions] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [stats, setStats] = useState({
+    totalTrades: 0,
+    totalProfit: 0,
+    successRate: 0,
+    avgProfit: 0
+  });
+  const [dateRange, setDateRange] = useState({
+    from: addDays(new Date(), -7),
+    to: new Date(),
+  });
 
   useEffect(() => {
-    loadPortfolioData();
+    loadData();
+    
+    // Subscribe to live bot state for real-time updates
+    const unsubscribe = botStateManager.subscribe(state => {
+      // Add live executions to our data
+      const liveFlashloanTrades = state.executions.filter(e => 
+        e.strategy_type === 'flashloan' && 
+        (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade')
+      );
+      
+      if (liveFlashloanTrades.length > 0) {
+        setExecutions(prev => {
+          const combined = [...liveFlashloanTrades, ...prev];
+          // Remove duplicates based on client_id or id
+          const unique = combined.filter((item, index, self) => 
+            index === self.findIndex(i => (i.id || i.client_id) === (item.id || item.client_id))
+          );
+          return unique;
+        });
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
-  const loadPortfolioData = async () => {
+  const loadData = async () => {
+    setIsLoading(true);
     try {
-      const [portfolioData, tradesData] = await Promise.all([
-        base44.entities.Portfolio.list(),
-        base44.entities.Trade.list('-created_date', 10)
-      ]);
-      setPortfolio(portfolioData);
-      setTrades(tradesData);
+      // Load from database
+      const allRecords = await BotExecution.list('-created_date', 100);
+      
+      // Filter for flashloan trades only
+      const flashloanTrades = allRecords.filter(record => 
+        record.strategy_type === 'flashloan' && 
+        (record.execution_type === 'trade' || record.execution_type === 'flashloan_trade')
+      );
+      
+      // Apply date filter
+      const filteredRecords = flashloanTrades.filter(record => {
+        if (!record.created_date) return false;
+        
+        try {
+          const recordDate = new Date(record.created_date);
+          const fromDate = new Date(dateRange.from);
+          fromDate.setHours(0, 0, 0, 0);
+          const toDate = new Date(dateRange.to);
+          toDate.setHours(23, 59, 59, 999);
+          return recordDate >= fromDate && recordDate <= toDate;
+        } catch (error) {
+          console.error("Error parsing date for record:", record);
+          return false;
+        }
+      });
+
+      setExecutions(filteredRecords);
+      
+      // Calculate statistics
+      const completedTrades = filteredRecords.filter(e => e.status === 'completed');
+      const totalProfit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
+      const successRate = filteredRecords.length > 0 ? (completedTrades.length / filteredRecords.length) * 100 : 0;
+      const avgProfit = completedTrades.length > 0 ? totalProfit / completedTrades.length : 0;
+      
+      setStats({
+        totalTrades: filteredRecords.length,
+        totalProfit: totalProfit,
+        successRate: successRate,
+        avgProfit: avgProfit
+      });
+      
     } catch (error) {
-      console.error("Error loading portfolio:", error);
+      console.error('Failed to load portfolio data:', error);
+      setExecutions([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const calculateTotals = () => {
-    const totalValue = portfolio.reduce((sum, p) => sum + (p.current_value || 0), 0);
-    const totalInvested = portfolio.reduce((sum, p) => sum + (p.total_invested || 0), 0);
-    const totalPnL = portfolio.reduce((sum, p) => sum + (p.profit_loss || 0), 0);
-    const totalPnLPercentage = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+  const downloadCSV = () => {
+    if (executions.length === 0) {
+      alert("No flashloan trading data to export.");
+      return;
+    }
+
+    const headers = ['Date', 'Time', 'Status', 'Loan Provider', 'Loan Amount', 'Profit ($)', 'ROI (%)', 'Gas Used', 'Details'];
+    const rows = executions.map(exec => {
+      const timestamp = exec.created_date || exec.client_timestamp || Date.now();
+      const safeDate = new Date(Number(timestamp));
+      const loanAmount = exec.details?.loanAmount || 0;
+      const roi = loanAmount > 0 && exec.profit_realized ? ((exec.profit_realized / loanAmount) * 100) : 0;
+      
+      return [
+        format(safeDate, 'yyyy-MM-dd'),
+        format(safeDate, 'HH:mm:ss'),
+        exec.status || 'unknown',
+        exec.details?.loanProvider || 'unknown',
+        loanAmount.toLocaleString(),
+        exec.profit_realized !== null && exec.profit_realized !== undefined ? exec.profit_realized.toFixed(2) : 'N/A',
+        roi.toFixed(3) + '%',
+        exec.gas_used || 'N/A',
+        exec.details?.tx_hash ? exec.details.tx_hash : exec.details?.message || 'N/A'
+      ];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
     
-    return { totalValue, totalInvested, totalPnL, totalPnLPercentage };
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      const fromDate = format(dateRange.from, 'yyyy-MM-dd');
+      const toDate = format(dateRange.to, 'yyyy-MM-dd');
+      link.setAttribute('download', `flashloan-portfolio-${fromDate}-to-${toDate}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
-
-  const { totalValue, totalInvested, totalPnL, totalPnLPercentage } = calculateTotals();
-
-  const pieData = portfolio.map(p => ({
-    name: `${p.asset} (${p.exchange})`,
-    value: p.current_value || 0,
-    color: p.asset === 'USDC' ? '#f97316' : p.asset === 'USDT' ? '#eab308' : '#64748b'
-  }));
-
-  const COLORS = ['#f97316', '#eab308', '#64748b', '#06b6d4', '#8b5cf6'];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4"
-        >
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex justify-between items-start mb-8">
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Portfolio Overview
+              Flashloan Portfolio
             </h1>
             <p className="text-slate-600 mt-2 font-medium">
-              Track your USDC positions across exchanges
+              Track your flashloan trading performance and generate detailed reports
             </p>
           </div>
-          
-          <Button className="bg-gradient-to-r from-orange-500 to-amber-500">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Position
-          </Button>
         </motion.div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Total Portfolio Value</p>
-                    <h3 className="text-3xl font-bold text-slate-900">
-                      ${totalValue.toLocaleString()}
-                    </h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600">
-                    <Wallet className="w-6 h-6 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Total P&L</p>
-                    <h3 className={`text-3xl font-bold ${totalPnL >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
-                    </h3>
-                  </div>
-                  <div className={`p-3 rounded-xl bg-gradient-to-br ${totalPnL >= 0 ? 'from-emerald-500 to-teal-600' : 'from-red-500 to-pink-600'}`}>
-                    {totalPnL >= 0 ? (
-                      <TrendingUp className="w-6 h-6 text-white" />
-                    ) : (
-                      <TrendingDown className="w-6 h-6 text-white" />
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">P&L Percentage</p>
-                    <h3 className={`text-3xl font-bold ${totalPnLPercentage >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {totalPnLPercentage >= 0 ? '+' : ''}{totalPnLPercentage.toFixed(2)}%
-                    </h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600">
-                    <ArrowUpRight className="w-6 h-6 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-
-        {/* Main Content */}
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Portfolio Distribution */}
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle>Asset Distribution</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-48 mb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={40}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [`$${value.toLocaleString()}`, 'Value']} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="space-y-2">
-                {pieData.map((entry, index) => (
-                  <div key={entry.name} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full" 
-                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                      />
-                      <span>{entry.name}</span>
-                    </div>
-                    <span className="font-medium">${entry.value.toLocaleString()}</span>
-                  </div>
-                ))}
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <TrendingUp className="w-8 h-8 text-emerald-500" />
+                <div>
+                  <div className="text-2xl font-bold text-slate-900">${stats.totalProfit.toFixed(2)}</div>
+                  <div className="text-sm text-slate-600">Total Profit</div>
+                </div>
               </div>
             </CardContent>
           </Card>
-
-          {/* Positions List */}
-          <div className="lg:col-span-2">
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle>Active Positions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {portfolio.length > 0 ? (
-                    portfolio.map((position, index) => (
-                      <motion.div
-                        key={position.id || index}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="flex items-center justify-between p-4 rounded-lg border border-slate-100 bg-slate-50/50"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
-                            <span className="text-white font-bold text-sm">{position.asset}</span>
-                          </div>
-                          <div>
-                            <div className="font-semibold text-slate-900">{position.asset}</div>
-                            <div className="text-sm text-slate-600">{position.exchange}</div>
-                          </div>
-                        </div>
-                        
-                        <div className="text-right">
-                          <div className="font-semibold">{position.balance?.toLocaleString()}</div>
-                          <div className="text-sm text-slate-600">
-                            ${position.current_value?.toLocaleString()}
-                          </div>
-                        </div>
-                        
-                        <div className="text-right">
-                          <div className={`font-semibold ${
-                            (position.profit_loss || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'
-                          }`}>
-                            {(position.profit_loss || 0) >= 0 ? '+' : ''}${(position.profit_loss || 0).toFixed(2)}
-                          </div>
-                          <div className="text-sm text-slate-600">P&L</div>
-                        </div>
-                      </motion.div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8">
-                      <Wallet className="w-16 h-16 text-slate-400 mx-auto mb-4" />
-                      <h3 className="text-xl font-semibold text-slate-900 mb-2">No positions yet</h3>
-                      <p className="text-slate-600 mb-4">Start by adding your first position</p>
-                      <Button className="bg-gradient-to-r from-orange-500 to-amber-500">
-                        <Plus className="w-4 h-4 mr-2" />
-                        Add Position
-                      </Button>
-                    </div>
-                  )}
+          
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <Database className="w-8 h-8 text-blue-500" />
+                <div>
+                  <div className="text-2xl font-bold text-slate-900">{stats.totalTrades}</div>
+                  <div className="text-sm text-slate-600">Total Trades</div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <FileText className="w-8 h-8 text-purple-500" />
+                <div>
+                  <div className="text-2xl font-bold text-slate-900">{stats.successRate.toFixed(1)}%</div>
+                  <div className="text-sm text-slate-600">Success Rate</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <TrendingUp className="w-8 h-8 text-amber-500" />
+                <div>
+                  <div className="text-2xl font-bold text-slate-900">${stats.avgProfit.toFixed(2)}</div>
+                  <div className="text-sm text-slate-600">Avg Profit</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
+
+        {/* Date Range and Export */}
+        <Card className="mb-6 bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-2">Start Date</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant={"outline"} className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {dateRange.from ? format(dateRange.from, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar 
+                      mode="single" 
+                      selected={dateRange.from} 
+                      onSelect={(d) => setDateRange(prev => ({...prev, from: d}))} 
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-2">End Date</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant={"outline"} className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {dateRange.to ? format(dateRange.to, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar 
+                      mode="single" 
+                      selected={dateRange.to} 
+                      onSelect={(d) => setDateRange(prev => ({...prev, to: d}))} 
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div>
+                <Button onClick={loadData} disabled={isLoading} className="w-full">
+                  <FileText className="w-4 h-4 mr-2" />
+                  {isLoading ? 'Loading...' : 'Update Report'}
+                </Button>
+              </div>
+
+              <div>
+                <Button onClick={downloadCSV} disabled={executions.length === 0} variant="outline" className="w-full">
+                  <Download className="w-4 h-4 mr-2" />
+                  Export CSV ({executions.length})
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Data Table */}
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5" />
+              Flashloan Trading History ({executions.length} records)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {executions.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Loan Amount</TableHead>
+                    <TableHead>Profit ($)</TableHead>
+                    <TableHead>ROI (%)</TableHead>
+                    <TableHead>Details</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {executions.map((exec, index) => {
+                    const timestamp = exec.created_date || exec.client_timestamp || Date.now();
+                    const safeDate = new Date(Number(timestamp));
+                    const loanAmount = exec.details?.loanAmount || 0;
+                    const roi = loanAmount > 0 && exec.profit_realized ? ((exec.profit_realized / loanAmount) * 100) : 0;
+                    
+                    return (
+                      <TableRow key={exec.id || exec.client_id || index}>
+                        <TableCell>{format(safeDate, 'yyyy-MM-dd')}</TableCell>
+                        <TableCell>{format(safeDate, 'HH:mm:ss')}</TableCell>
+                        <TableCell><StatusBadge status={exec.status} /></TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                            {exec.details?.loanProvider || 'AAVE'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono">${loanAmount.toLocaleString()}</TableCell>
+                        <TableCell className={exec.profit_realized >= 0 ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>
+                          {exec.profit_realized !== null && exec.profit_realized !== undefined 
+                            ? `$${exec.profit_realized.toFixed(2)}` 
+                            : 'N/A'
+                          }
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {roi > 0 ? `+${roi.toFixed(3)}%` : roi < 0 ? `${roi.toFixed(3)}%` : 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          {exec.details?.tx_hash ? (
+                            <Button variant="ghost" size="sm" asChild>
+                              <a 
+                                href={`https://polygonscan.com/tx/${exec.details.tx_hash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                View Tx
+                              </a>
+                            </Button>
+                          ) : (
+                            <span className="text-sm text-slate-500">
+                              {exec.details?.message || 'No details'}
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-12">
+                <Database className="w-16 h-16 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">
+                  {isLoading ? 'Loading portfolio data...' : 'No flashloan trades found'}
+                </h3>
+                <p className="text-slate-600">
+                  {isLoading 
+                    ? 'Please wait while we fetch your trading history...' 
+                    : 'Start the flashloan bot to generate trading data, or adjust your date range.'
+                  }
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

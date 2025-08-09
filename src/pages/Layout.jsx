@@ -1,4 +1,5 @@
 
+
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -6,15 +7,17 @@ import {
   DollarSign,
   Zap,
   Database,
-  Rocket
+  Rocket,
+  FileText // Added FileText icon
 } from "lucide-react";
 
 // SIMPLIFIED - Only 4 pages you need to make money
 const navigationItems = [
   { title: "Dashboard", url: "/Dashboard", icon: BarChart3 },
   { title: "FlashLoan Bot", url: "/Bot", icon: Zap },
-  { title: "Database", url: "/Analytics", icon: Database }, // Keep title, change URL
-  { title: "Deploy", url: "/Opportunities", icon: Rocket }, // Keep title, change URL
+  { title: "Live Database", url: "/Analytics", icon: Database }, // Title updated
+  { title: "Portfolio", url: "/Portfolio", icon: FileText }, // New navigation item (was Reports)
+  { title: "Deploy", url: "/Opportunities", icon: Rocket },
 ];
 
 export default function Layout({ children }) {
@@ -76,3 +79,4 @@ export default function Layout({ children }) {
     </div>
   );
 }
+

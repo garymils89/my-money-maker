@@ -1,4 +1,4 @@
-import { BotEngine } from './BotEngine';
+import botEngineInstance from './BotEngine';
 
 let state = {
   executions: [],
@@ -24,7 +24,6 @@ export const botStateManager = {
   },
 
   addExecution: (newExecution) => {
-    // FIX: Remove the 200 event limit - keep all executions for proper reporting
     state.executions = [newExecution, ...state.executions];
     notifyListeners();
   },
@@ -75,4 +74,5 @@ export const botStateManager = {
   }
 };
 
-export { BotEngine };
+// Export BotEngine as named export so pages can import it
+export const BotEngine = botEngineInstance;
