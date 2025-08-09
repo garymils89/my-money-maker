@@ -145,7 +145,7 @@ class Engine {
         opportunity: { buyDex: 'Uniswap', sellDex: 'QuickSwap', pair: 'USDC/USDT' },
         loanAmount: this.strategies.flashloan.config.flashloanAmount,
         loanFee: this.strategies.flashloan.config.flashloanAmount * 0.0009,
-        tx_hash: success ? `0x${Math.random().toString(16).substring(2, 42)}` : null
+        tx_hash: success ? `0x${Math.random().toString(16).substr(2, 40)}` : null
       },
       bot_config_id: 'simulated_bot_1',
       opportunity_id: `opp-${Date.now()}`
@@ -161,7 +161,13 @@ class Engine {
       console.log('--- ATTEMPTING TO SAVE TO DATABASE ---', executionData);
       const savedRecord = await BotExecution.create(executionData);
       console.log('--- ✅ SUCCESS: Record saved to database! ---', savedRecord);
-    } catch (error) { // FIX: Changed (error: any) to (error) for valid JavaScript
+      
+      // IMMEDIATELY TEST READ-BACK
+      console.log('--- 🔍 TESTING IMMEDIATE READ-BACK ---');
+      const allRecords = await BotExecution.list('-created_date', 10);
+      console.log('--- 📊 IMMEDIATE READ RESULT:', allRecords.length, 'records found');
+      
+    } catch (error) { // Removed ': any' type annotation
       console.error('--- ❌ FAILED TO SAVE TO DATABASE! ---', error);
       // Also add an error execution to the live feed so it's visible in the UI
       botStateManager.addExecution({
@@ -169,7 +175,7 @@ class Engine {
         execution_type: 'error',
         strategy_type: 'system',
         status: 'failed',
-        details: { message: 'Failed to save execution to database.', error: (error instanceof Error) ? error.message : String(error) }
+        details: { message: error.message || 'An unknown error occurred.' } // Ensure message is always present
       });
     }
 
