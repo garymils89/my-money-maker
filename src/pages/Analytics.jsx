@@ -34,19 +34,27 @@ const StatusBadge = ({ status }) => {
 export default function Analytics() {
   const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState('Page loaded - waiting for first refresh');
 
   useEffect(() => {
     loadDatabaseData();
   }, []);
 
   const loadDatabaseData = async () => {
+    console.log("🔄 REFRESH BUTTON CLICKED!");
+    setDebugInfo('🔄 Refresh button clicked - starting query...');
     setIsLoading(true);
+    
     try {
+      console.log("📊 About to call BotExecution.list()");
       const allExecutions = await BotExecution.list('-created_date', 5000);
-      // FIX: Show ALL executions to ensure data is being saved. We can filter later if needed.
+      console.log("📊 Database call completed:", allExecutions);
+      
+      setDebugInfo(`✅ Found ${allExecutions.length} records in database`);
       setExecutions(allExecutions);
     } catch (error) {
-      console.error("Error loading execution data:", error);
+      console.error("❌ Database error:", error);
+      setDebugInfo(`❌ ERROR: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -96,22 +104,30 @@ export default function Analytics() {
         >
           <div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Execution Database
+              Trading Database
             </h1>
             <p className="text-slate-600 mt-2 font-medium">
-              Raw execution data from your bot
+              Raw trade execution data from your bot
             </p>
+            {/* BIG DEBUG INFO */}
+            <div className="bg-red-100 border border-red-300 rounded p-3 mt-3">
+              <p className="text-red-800 font-mono text-sm">{debugInfo}</p>
+              <p className="text-red-600 text-xs">Check browser console for more details</p>
+            </div>
           </div>
           
           <div className="flex gap-3">
             <Button
-              onClick={loadDatabaseData}
+              onClick={() => {
+                console.log("🖱️ Refresh button physically clicked");
+                loadDatabaseData();
+              }}
               disabled={isLoading}
               variant="outline"
               className="flex items-center gap-2"
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
+              Refresh Database
             </Button>
             <Button
               onClick={downloadCSV}
@@ -128,7 +144,7 @@ export default function Analytics() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Database className="w-5 h-5" />
-              Bot Execution History
+              Bot Execution History ({executions.length} records)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -190,7 +206,8 @@ export default function Analytics() {
               <div className="text-center py-12">
                 <Database className="w-16 h-16 text-slate-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-slate-900 mb-2">No execution data found</h3>
-                <p className="text-slate-600">Start your bot to begin recording execution data</p>
+                <p className="text-slate-600">Database returned {executions.length} records</p>
+                <p className="text-slate-500 text-sm mt-2">Debug: {debugInfo}</p>
               </div>
             )}
           </CardContent>
