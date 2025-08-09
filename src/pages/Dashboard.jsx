@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { BotExecution } from "@/api/entities";
 import { motion } from "framer-motion";
@@ -10,13 +9,7 @@ import { Bot } from "lucide-react";
 import StatsGrid from "../components/dashboard/StatsGrid";
 import LiveOpportunities from "../components/dashboard/LiveOpportunities";
 import MarketOverview from "../components/dashboard/MarketOverview";
-import { ethers } from "ethers";
-import { botStateManager } from "../components/bot/botState"; // Import bot state
-
-// Wallet details for balance fetching
-const NATIVE_USDC_CONTRACT_ADDRESS = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
-const BRIDGED_USDC_CONTRACT_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
-const USDC_ABI = ["function balanceOf(address owner) view returns (uint256)", "function decimals() view returns (uint8)"];
+import { botStateManager } from "../components/bot/botState";
 
 export default function Dashboard() {
   const [executions, setExecutions] = useState([]);
@@ -24,17 +17,26 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [walletBalance, setWalletBalance] = useState(0);
 
+  // FIX: Use subscribe-only pattern for state management
   useEffect(() => {
-    loadData();
+    setIsLoading(true);
     
-    // Subscribe to bot state updates for real-time data
-    const unsubscribe = botStateManager.subscribe((botExecutions) => {
-      setExecutions(botExecutions);
+    // Subscribe to bot state updates. The manager will immediately send the current state.
+    const unsubscribe = botStateManager.subscribe((state) => {
+      setExecutions(state.executions);
+      setWalletBalance(state.walletBalance);
       setLastUpdated(new Date());
+      
+      // If we just got the initial state and it's empty, try loading from the DB.
+      if (state.executions.length === 0) {
+        loadFromDatabase();
+      } else {
+        setIsLoading(false);
+      }
     });
     
-    // Refresh every 30 seconds (less frequent than bot page)
-    const interval = setInterval(loadData, 30000);
+    // Periodically try to sync from DB as a fallback.
+    const interval = setInterval(loadFromDatabase, 30000);
     
     return () => {
       clearInterval(interval);
@@ -42,56 +44,25 @@ export default function Dashboard() {
     };
   }, []);
 
-  const fetchWalletBalance = async () => {
-    try {
-      const rpcUrl = import.meta.env.VITE_POLYGON_RPC_URL;
-      const privateKey = import.meta.env.VITE_WALLET_PRIVATE_KEY;
-      if (!rpcUrl || !privateKey) return 0;
-      
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
-      const wallet = new ethers.Wallet(privateKey, provider);
-      const address = await wallet.getAddress();
-      
-      const nativeUsdcContract = new ethers.Contract(NATIVE_USDC_CONTRACT_ADDRESS, USDC_ABI, provider);
-      const bridgedUsdcContract = new ethers.Contract(BRIDGED_USDC_CONTRACT_ADDRESS, USDC_ABI, provider);
-      
-      const [nativeUsdcWei, bridgedUsdcWei, nativeDecimals, bridgedDecimals] = await Promise.all([
-        nativeUsdcContract.balanceOf(address),
-        bridgedUsdcContract.balanceOf(address),
-        nativeUsdcContract.decimals(),
-        bridgedUsdcContract.decimals()
-      ]);
-
-      const nativeUsdc = parseFloat(ethers.formatUnits(nativeUsdcWei, Number(nativeDecimals)));
-      const bridgedUsdc = parseFloat(ethers.formatUnits(bridgedUsdcWei, Number(bridgedDecimals)));
-      
-      return nativeUsdc + bridgedUsdc;
-    } catch(e) {
-      console.error("Error fetching wallet balance for dashboard:", e);
-      return 0;
+  const loadFromDatabase = async () => {
+    // Only fetch from DB if the live state is still empty.
+    if (botStateManager.getState().executions.length > 0) {
+      setIsLoading(false);
+      return;
     }
-  };
-
-  const loadData = async () => {
-    setIsLoading(true);
+    
     try {
-      // Get bot executions from central state first (instant)
-      const botExecutions = botStateManager.getExecutions();
+      console.log("Dashboard: state empty, loading from DB...");
+      const executionData = await BotExecution.list('-created_date', 1000);
       
-      // If we have bot data, use it; otherwise load from database
-      const executionData = botExecutions.length > 0 
-        ? botExecutions 
-        : await BotExecution.list('-created_date', 1000);
-      
-      const balance = await fetchWalletBalance();
-      
-      setExecutions(executionData || []);
-      setWalletBalance(balance);
+      if (executionData && executionData.length > 0) {
+        // This will update the dashboard via the subscription.
+        botStateManager.setAllExecutions(executionData);
+      }
       setLastUpdated(new Date());
-      
-      console.log(`📊 Dashboard loaded: ${executionData?.length || 0} executions, $${balance.toFixed(2)} balance`);
+      console.log(`📊 Dashboard loaded from DB: ${executionData?.length || 0} executions`);
     } catch (error) {
-      console.error("Error loading dashboard data:", error);
+      console.error("Error loading dashboard data from DB:", error);
     } finally {
       setIsLoading(false);
     }
@@ -106,13 +77,11 @@ export default function Dashboard() {
     const totalProfit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
     const totalTradesCount = trades.length;
     
-    // Today's data
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayTrades = completedTrades.filter(e => new Date(e.created_date) >= today);
     const todayProfit = todayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
 
-    // Yesterday's data for comparison
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
     const yesterdayTrades = completedTrades.filter(e => {
@@ -121,27 +90,24 @@ export default function Dashboard() {
     });
     const yesterdayProfit = yesterdayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
 
-    // Calculate profit change
     let profitChange = 0;
     if (yesterdayProfit > 0) {
       profitChange = ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100;
     } else if (todayProfit > 0) {
-      profitChange = 100; // Infinite growth if yesterday was 0
+      profitChange = 100;
     }
 
-    // Active opportunities (based on recent trades)
     const recentProfitableTrades = completedTrades.filter(e =>
-      new Date(e.created_date) > new Date(Date.now() - 15 * 60 * 1000) // Last 15 minutes
+      new Date(e.created_date) > new Date(Date.now() - 15 * 60 * 1000)
     );
 
-    // Best opportunity today
     const bestOppToday = todayTrades.length > 0
       ? Math.max(...todayTrades.map(t => t.details?.opportunity?.profitPercentage || 0))
       : 0;
 
     return {
       totalPortfolio: walletBalance,
-      portfolioChange: totalProfit > 0 ? 2.1 : -0.5, // Placeholder
+      portfolioChange: totalProfit > 0 ? 2.1 : -0.5,
       activeOpportunities: recentProfitableTrades.length,
       bestOpportunity: bestOppToday,
       todayProfit,
@@ -157,7 +123,7 @@ export default function Dashboard() {
   
     const tradesByDay = {};
     trades.forEach(trade => {
-      const day = new Date(trade.created_date).toLocaleDateString('en-CA'); // YYYY-MM-DD
+      const day = new Date(trade.created_date).toLocaleDateString('en-CA');
       if (!tradesByDay[day]) {
         tradesByDay[day] = { profit: 0, count: 0 };
       }
@@ -182,7 +148,6 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -204,7 +169,7 @@ export default function Dashboard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={loadData}
+              onClick={loadFromDatabase}
               disabled={isLoading}
               className="flex items-center gap-2"
             >
@@ -214,7 +179,6 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* Bot Status Alert */}
         {isLoading ? (
           <Alert className="mb-6 border-blue-200 bg-blue-50">
             <AlertDescription className="text-blue-800">
@@ -230,10 +194,8 @@ export default function Dashboard() {
           </Alert>
         )}
 
-        {/* Stats Grid */}
         <StatsGrid stats={stats} />
 
-        {/* Main Content Grid */}
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
             <MarketOverview data={chartData} />

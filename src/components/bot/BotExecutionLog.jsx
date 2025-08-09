@@ -1,347 +1,114 @@
-
-import React, { useState } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { 
-  Activity, 
-  TrendingUp, 
-  AlertTriangle, 
-  Search,
-  ExternalLink,
-  Filter,
-  Calendar,
-  Zap 
-} from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Clock, TrendingUp, AlertTriangle, Zap, Activity } from "lucide-react";
 import { motion } from "framer-motion";
-// BotExecution import is no longer directly used in this component as data is passed via props.
-// However, keeping it for completeness if it were ever needed for type checking or other minor utilities.
-// The outline does not explicitly remove it, so it's safer to keep it for now unless it causes issues.
-// For this change, it's irrelevant.
 
 export default function BotExecutionLog({ executions = [] }) {
-  // REMOVED internal state for executions and loading.
-  const [filter, setFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('created_date');
-  const [dateFilter, setDateFilter] = useState('all'); 
-
-  // REMOVED loadData and useEffect hooks.
-
   const getExecutionIcon = (type) => {
     switch (type) {
-      case 'trade':
-        return <TrendingUp className="w-4 h-4 text-emerald-500" />;
-      case 'flashloan_trade': 
-        return <Zap className="w-4 h-4 text-purple-500" />;
-      case 'scan':
-        return <Search className="w-4 h-4 text-blue-500" />;
-      case 'alert':
-        return <AlertTriangle className="w-4 h-4 text-amber-500" />;
-      default:
-        return <Activity className="w-4 h-4 text-slate-500" />;
+      case 'trade': return <TrendingUp className="w-4 h-4 text-emerald-500" />;
+      case 'flashloan_trade': return <Zap className="w-4 h-4 text-purple-500" />;
+      case 'error': return <AlertTriangle className="w-4 h-4 text-red-500" />;
+      case 'alert': return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+      default: return <Activity className="w-4 h-4 text-blue-500" />;
     }
   };
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'completed':
-        return 'bg-emerald-100 text-emerald-800';
-      case 'pending':
-        return 'bg-blue-100 text-blue-800';
-      case 'failed':
-        return 'bg-red-100 text-red-800';
-      case 'executing':
-        return 'bg-amber-100 text-amber-800';
-      default:
-        return 'bg-slate-100 text-slate-800';
+      case 'completed': return 'bg-emerald-100 text-emerald-800';
+      case 'failed': return 'bg-red-100 text-red-800';
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'executing': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-slate-100 text-slate-800';
     }
   };
 
-  // The component now filters the `executions` prop directly.
-  const filteredExecutions = executions
-    .filter(exec => {
-      if (filter === 'all') return true;
-      return exec.execution_type === filter;
-    })
-    .filter(exec => {
-      if (!searchTerm) return true;
-      return JSON.stringify(exec).toLowerCase().includes(searchTerm.toLowerCase());
-    })
-    .filter(exec => {
-      if (dateFilter === 'all') return true;
-      const execDate = new Date(exec.created_date);
-      const now = new Date();
-      
-      switch (dateFilter) {
-        case 'today':
-          return execDate.toDateString() === now.toDateString();
-        case 'yesterday':
-          const yesterday = new Date(now);
-          yesterday.setDate(now.getDate() - 1);
-          return execDate.toDateString() === yesterday.toDateString();
-        case 'week':
-          const weekAgo = new Date(now);
-          weekAgo.setDate(now.getDate() - 7);
-          weekAgo.setHours(0, 0, 0, 0); 
-          return execDate >= weekAgo;
-        case 'month':
-          const monthAgo = new Date(now);
-          monthAgo.setDate(now.getDate() - 30);
-          monthAgo.setHours(0, 0, 0, 0); 
-          return execDate >= monthAgo;
-        default:
-          return true;
-      }
-    })
-    .sort((a, b) => {
-      if (sortBy === 'created_date') {
-        return new Date(b.created_date) - new Date(a.created_date);
-      }
-      return 0;
-    });
-
-  const totalTrades = executions.filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade').length;
-  const successfulTrades = executions.filter(e => (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade') && e.status === 'completed').length;
-  const totalProfit = executions
-    .filter(e => (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade') && e.status === 'completed')
-    .reduce((sum, e) => sum + (e.profit_realized || 0), 0);
-
   return (
-    <div className="space-y-6">
-      {/* Summary Stats */}
-      <div className="grid md:grid-cols-4 gap-4">
-        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-slate-900">{totalTrades}</div>
-                <div className="text-sm text-slate-600">Total Trades</div>
-              </div>
-              <TrendingUp className="w-8 h-8 text-emerald-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-slate-900">
-                  {totalTrades > 0 ? ((successfulTrades / totalTrades) * 100).toFixed(1) : 0}%
-                </div>
-                <div className="text-sm text-slate-600">Success Rate</div>
-              </div>
-              <Activity className="w-8 h-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-emerald-600">
-                  ${totalProfit.toFixed(2)}
-                </div>
-                <div className="text-sm text-slate-600">Total Profit</div>
-              </div>
-              <TrendingUp className="w-8 h-8 text-emerald-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-slate-900">{executions.length}</div>
-                <div className="text-sm text-slate-600">Total Events</div>
-              </div>
-              <Activity className="w-8 h-8 text-slate-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="w-5 h-5 text-blue-500" />
-            Complete Execution History
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4 mb-4 flex-wrap">
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Filter by type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Events</SelectItem>
-                <SelectItem value="trade">Regular Trades</SelectItem>
-                <SelectItem value="flashloan_trade">Flashloan Trades</SelectItem>
-                <SelectItem value="scan">Scans Only</SelectItem>
-                <SelectItem value="alert">Alerts Only</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Filter by date" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Time</SelectItem>
-                <SelectItem value="today">Today Only</SelectItem>
-                <SelectItem value="yesterday">Yesterday Only</SelectItem>
-                <SelectItem value="week">Past Week</SelectItem>
-                <SelectItem value="month">Past Month</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Input
-              placeholder="Search executions..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
-
-          {/* Show current filter info */}
-          <div className="mb-4 text-sm text-slate-600">
-            Showing {filteredExecutions.length} of {executions.length} total events
-          </div>
-
-          {/* Execution List */}
-          <div className="space-y-3 max-h-96 overflow-y-auto">
-            {executions.length === 0 ? ( 
-              <div className="text-center py-8 text-slate-500">
-                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No executions found.</p>
-                <p className="mt-2 text-sm">Start the bot to begin collecting execution data.</p>
-              </div>
-            ) : filteredExecutions.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
-                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No executions found matching your criteria.</p>
-              </div>
-            ) : (
-              filteredExecutions.map((execution, index) => (
+    <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clock className="w-5 h-5 text-slate-600" />
+          Execution History
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-96">
+          <div className="space-y-3">
+            {executions.length > 0 ? (
+              executions.map((execution, index) => (
                 <motion.div
-                  key={execution.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  key={execution.id || `execution-${index}`}  // FIX: Added unique key
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className="p-4 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors"
+                  className="flex items-start justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      {getExecutionIcon(execution.execution_type)}
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-slate-900 capitalize">
-                            {execution.execution_type.replace(/_/g, ' ')}
-                          </span>
-                          <Badge className={getStatusColor(execution.status)}>
-                            {execution.status}
-                          </Badge>
-                          {execution.execution_time_ms && (
-                            <Badge variant="outline" className="text-xs">
-                              {execution.execution_time_ms}ms
-                            </Badge>
+                  <div className="flex items-start gap-3">
+                    {getExecutionIcon(execution.execution_type)}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-slate-900 capitalize">
+                          {execution.execution_type.replace('_', ' ')}
+                        </span>
+                        <Badge className={getStatusColor(execution.status)}>
+                          {execution.status}
+                        </Badge>
+                      </div>
+                      
+                      <div className="text-sm text-slate-600 mb-2">
+                        {new Date(execution.created_date).toLocaleString()}
+                      </div>
+                      
+                      {execution.details && (
+                        <div className="text-xs text-slate-500">
+                          {execution.details.opportunity?.pair && (
+                            <span>Pair: {execution.details.opportunity.pair} • </span>
+                          )}
+                          {execution.details.alert_type && (
+                            <span>Alert: {execution.details.alert_type} • </span>
+                          )}
+                          {execution.error_message && (
+                            <span className="text-red-600">Error: {execution.error_message.substring(0, 50)}...</span>
                           )}
                         </div>
-                        
-                        <div className="text-sm text-slate-600 mb-2">
-                          {new Date(execution.created_date).toLocaleString()}
-                        </div>
-
-                        {/* Execution Details */}
-                        {execution.details && (
-                          <div className="text-sm">
-                            {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.details.opportunity && (
-                              <div className="space-y-1">
-                                <div>
-                                  <span className="font-medium">Pair:</span> {execution.details.opportunity.pair}
-                                </div>
-                                <div>
-                                  <span className="font-medium">Route:</span> {execution.details.opportunity.buyDex} → {execution.details.opportunity.sellDex}
-                                </div>
-                                <div>
-                                  <span className="font-medium">Profit:</span> 
-                                  <span className="text-emerald-600 font-semibold ml-1">
-                                    {execution.details.opportunity.profitPercentage?.toFixed(2)}% 
-                                    (${execution.details.opportunity.netProfitUsd?.toFixed(2)})
-                                  </span>
-                                </div>
-                                {execution.details.loanAmount && ( 
-                                  <div>
-                                      <span className="font-medium">Loan:</span> ${execution.details.loanAmount.toLocaleString()}
-                                  </div>
-                                )}
-                                {/* Display transaction hash */}
-                                {execution.status === 'completed' && execution.details.tx_hash && (
-                                  <div>
-                                    <span className="font-medium">TX Hash:</span> 
-                                    <span className="font-mono text-blue-600 ml-1 text-xs">
-                                      {execution.details.tx_hash}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            
-                            {execution.execution_type === 'scan' && (
-                              <div>
-                                <span className="font-medium">Opportunities Found:</span> {execution.details.found || 0}
-                              </div>
-                            )}
-                            
-                            {execution.execution_type === 'alert' && (
-                              <div>
-                                <span className="font-medium">{execution.details.alert_type}:</span> {execution.details.message}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Profit/Loss */}
-                        {execution.profit_realized && execution.profit_realized !== 0 && (
-                          <div className="flex items-center gap-4 mt-2 text-sm">
-                            <span className={execution.profit_realized > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                              <span className="font-medium">P&L:</span> 
-                              {execution.profit_realized > 0 ? '+' : ''}${execution.profit_realized.toFixed(2)}
-                            </span>
-                            {execution.gas_used && (
-                              <span className="text-slate-600">
-                                <span className="font-medium">Gas:</span> {execution.gas_used.toFixed(4)} MATIC
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      )}
                     </div>
-
-                    {(execution.execution_type === 'trade' || execution.execution_type === 'flashloan_trade') && execution.status === 'completed' && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        className="text-slate-500 hover:text-slate-700"
-                        onClick={() => window.open('https://polygonscan.com/', '_blank')}
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </Button>
+                  </div>
+                  
+                  <div className="text-right">
+                    {execution.profit_realized !== undefined && (
+                      <div className={`font-semibold ${
+                        execution.profit_realized >= 0 ? 'text-emerald-600' : 'text-red-600'
+                      }`}>
+                        {execution.profit_realized >= 0 ? '+' : ''}${execution.profit_realized.toFixed(2)}
+                      </div>
+                    )}
+                    {execution.gas_used && (
+                      <div className="text-xs text-slate-500">
+                        Gas: {execution.gas_used.toFixed(4)} MATIC
+                      </div>
+                    )}
+                    {execution.execution_time_ms && (
+                      <div className="text-xs text-slate-500">
+                        {(execution.execution_time_ms / 1000).toFixed(2)}s
+                      </div>
                     )}
                   </div>
                 </motion.div>
               ))
+            ) : (
+              <div className="text-center py-8 text-slate-500">
+                <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No execution history yet</p>
+                <p className="text-sm mt-2">Start the bot to begin recording activities</p>
+              </div>
             )}
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
   );
 }

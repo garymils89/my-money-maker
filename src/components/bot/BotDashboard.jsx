@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,36 +17,38 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-export default function BotDashboard({ botConfig, executions = [], onToggleBot, onUpdateConfig }) {
-  const [isRunning, setIsRunning] = useState(botConfig?.is_active || false);
-  const [stats, setStats] = useState({
+export default function BotDashboard({ stats, wallet, botConfig, executions = [], onToggleBot, onUpdateConfig }) {
+  const [isRunning, setIsRunning] = useState(stats?.isRunning || false);
+  const [calculatedStats, setCalculatedStats] = useState({
     tradesExecuted: 0,
     successRate: 0,
     totalProfit: 0,
     avgExecutionTime: 0
   });
 
-  useEffect(() => {
-    calculateStats();
-  }, [executions]);
-
-  const calculateStats = () => {
-    const trades = executions.filter(e => e.execution_type === 'trade');
+  // FIX: Use useCallback to create a stable function reference
+  const calculateStats = useCallback(() => {
+    const trades = executions.filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade');
     const successful = trades.filter(e => e.status === 'completed');
     
-    setStats({
+    setCalculatedStats({
       tradesExecuted: trades.length,
       successRate: trades.length > 0 ? (successful.length / trades.length) * 100 : 0,
       totalProfit: successful.reduce((sum, t) => sum + (t.profit_realized || 0), 0),
       avgExecutionTime: trades.length > 0 ? 
         trades.reduce((sum, t) => sum + (t.execution_time_ms || 0), 0) / trades.length : 0
     });
-  };
+  }, [executions]); // Only recreate when executions change
+
+  // FIX: Now the dependency array is stable
+  useEffect(() => {
+    calculateStats();
+  }, [calculateStats]); // This won't cause infinite loops anymore
 
   const handleToggleBot = () => {
     const newStatus = !isRunning;
     setIsRunning(newStatus);
-    onToggleBot(newStatus);
+    if (onToggleBot) onToggleBot(newStatus);
   };
 
   const getStatusColor = () => {
@@ -115,7 +117,7 @@ export default function BotDashboard({ botConfig, executions = [], onToggleBot, 
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">Trades Executed</p>
-                  <h3 className="text-2xl font-bold text-slate-900">{stats.tradesExecuted}</h3>
+                  <h3 className="text-2xl font-bold text-slate-900">{calculatedStats.tradesExecuted}</h3>
                 </div>
                 <Activity className="w-8 h-8 text-blue-500" />
               </div>
@@ -133,7 +135,7 @@ export default function BotDashboard({ botConfig, executions = [], onToggleBot, 
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">Success Rate</p>
-                  <h3 className="text-2xl font-bold text-emerald-600">{stats.successRate.toFixed(1)}%</h3>
+                  <h3 className="text-2xl font-bold text-emerald-600">{calculatedStats.successRate.toFixed(1)}%</h3>
                 </div>
                 <TrendingUp className="w-8 h-8 text-emerald-500" />
               </div>
@@ -151,7 +153,7 @@ export default function BotDashboard({ botConfig, executions = [], onToggleBot, 
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">Total Profit</p>
-                  <h3 className="text-2xl font-bold text-orange-600">${stats.totalProfit.toFixed(2)}</h3>
+                  <h3 className="text-2xl font-bold text-orange-600">${calculatedStats.totalProfit.toFixed(2)}</h3>
                 </div>
                 <Zap className="w-8 h-8 text-orange-500" />
               </div>
@@ -169,7 +171,7 @@ export default function BotDashboard({ botConfig, executions = [], onToggleBot, 
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-slate-600">Avg Speed</p>
-                  <h3 className="text-2xl font-bold text-purple-600">{(stats.avgExecutionTime / 1000).toFixed(1)}s</h3>
+                  <h3 className="text-2xl font-bold text-purple-600">{(calculatedStats.avgExecutionTime / 1000).toFixed(1)}s</h3>
                 </div>
                 <Clock className="w-8 h-8 text-purple-500" />
               </div>
@@ -212,6 +214,27 @@ export default function BotDashboard({ botConfig, executions = [], onToggleBot, 
               <div className="text-lg font-semibold">{botConfig?.slippage_tolerance || 0.5}%</div>
             </div>
           </div>
+
+          {/* Wallet Balance Display */}
+          {wallet && (
+            <div className="mt-6 pt-4 border-t border-slate-200">
+              <h4 className="font-semibold mb-3">Wallet Status</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <div className="text-slate-600">USDC Balance</div>
+                  <div className="font-semibold">${(wallet.nativeUsdc + wallet.bridgedUsdc).toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-600">MATIC (Gas)</div>
+                  <div className="font-semibold">{wallet.matic.toFixed(4)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-600">Address</div>
+                  <div className="font-mono text-xs">{wallet.address?.substring(0, 10)}...{wallet.address?.slice(-6)}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
