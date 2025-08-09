@@ -1,9 +1,13 @@
+import { BotEngine } from './BotEngine';
 
 let state = {
   executions: [],
-  dailyStats: null,
+  dailyStats: { trades: 0, profit: 0, loss: 0, gasUsed: 0 },
   walletBalance: 0,
-  isRunning: false,
+  activeStrategies: {
+    arbitrage: false,
+    flashloan: false,
+  },
   isLive: false,
 };
 
@@ -13,8 +17,6 @@ const notifyListeners = () => {
   listeners.forEach(listener => listener(state));
 };
 
-// FIX: Removing default export to avoid ambiguity for the build process.
-// Only named export will be used.
 export const botStateManager = {
   updateState: (newState) => {
     state = { ...state, ...newState };
@@ -22,16 +24,9 @@ export const botStateManager = {
   },
 
   addExecution: (newExecution) => {
-    const isDuplicate = state.executions.some(existing => 
-      existing.execution_type === newExecution.execution_type &&
-      existing.status === newExecution.status &&
-      Math.abs(new Date(existing.created_date).getTime() - new Date(newExecution.created_date).getTime()) < 1000
-    );
-
-    if (!isDuplicate) {
-      state.executions = [newExecution, ...state.executions.slice(0, 199)];
-      notifyListeners();
-    }
+    // FIX: Remove the 200 event limit - keep all executions for proper reporting
+    state.executions = [newExecution, ...state.executions];
+    notifyListeners();
   },
   
   setAllExecutions: (allExecutions) => {
@@ -49,18 +44,22 @@ export const botStateManager = {
     notifyListeners();
   },
 
-  setBotStatus: (status) => {
-    if (typeof status.isRunning === 'boolean') {
-      state.isRunning = status.isRunning;
-    }
-    if (typeof status.isLive === 'boolean') {
-      state.isLive = status.isLive;
-    }
+  setStrategyStatus: (strategy, isRunning) => {
+    state.activeStrategies[strategy] = isRunning;
+    notifyListeners();
+  },
+  
+  setBotLiveStatus: (isLive) => {
+    state.isLive = isLive;
     notifyListeners();
   },
 
   getState: () => {
     return { ...state };
+  },
+
+  isStrategyRunning: (strategy) => {
+    return state.activeStrategies[strategy];
   },
 
   getExecutions: () => {
@@ -69,10 +68,11 @@ export const botStateManager = {
 
   subscribe: (listener) => {
     listeners.push(listener);
-    // This is key: the subscription immediately sends the current state to the new listener.
     listener(state); 
     return () => {
       listeners = listeners.filter(l => l !== listener);
     };
   }
 };
+
+export { BotEngine };

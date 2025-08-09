@@ -1,339 +1,200 @@
+
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { BotExecution } from "@/api/entities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, BarChart, Bar } from 'recharts';
-import { TrendingUp, Calendar, Target, DollarSign } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { 
+  Database, 
+  Download,
+  RefreshCw,
+  ExternalLink
+} from "lucide-react";
 import { motion } from "framer-motion";
+import { format } from 'date-fns';
+
+const StatusBadge = ({ status }) => {
+  const styles = {
+    completed: 'bg-emerald-100 text-emerald-800',
+    failed: 'bg-red-100 text-red-800',
+    executing: 'bg-blue-100 text-blue-800',
+    default: 'bg-slate-100 text-slate-800',
+  };
+  return <Badge className={styles[status] || styles.default}>{status}</Badge>;
+};
 
 export default function Analytics() {
-  const [trades, setTrades] = useState([]);
-  const [opportunities, setOpportunities] = useState([]);
+  const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadAnalyticsData();
+    loadDatabaseData();
   }, []);
 
-  const loadAnalyticsData = async () => {
+  const loadDatabaseData = async () => {
+    setIsLoading(true);
     try {
-      const [tradesData, oppData] = await Promise.all([
-        base44.entities.Trade.list('-created_date'),
-        base44.entities.ArbitrageOpportunity.list('-created_date')
-      ]);
-      setTrades(tradesData);
-      setOpportunities(oppData);
+      const allExecutions = await BotExecution.list('-created_date', 5000);
+      // FIX: Show ALL executions to ensure data is being saved. We can filter later if needed.
+      setExecutions(allExecutions);
     } catch (error) {
-      console.error("Error loading analytics:", error);
+      console.error("Error loading execution data:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Generate sample analytics data
-  const profitData = [
-    { date: '2024-01-15', profit: 120 },
-    { date: '2024-01-16', profit: 280 },
-    { date: '2024-01-17', profit: 190 },
-    { date: '2024-01-18', profit: 350 },
-    { date: '2024-01-19', profit: 420 },
-    { date: '2024-01-20', profit: 380 },
-    { date: '2024-01-21', profit: 520 },
-  ];
+  const downloadCSV = () => {
+    // Adjusted headers and data to match the new table structure and requirements
+    const headers = ['Date', 'Time', 'Type', 'Status', 'Provider', 'Profit ($)', 'Loan Amount ($)', 'Details'];
+    const rows = executions.map(exec => [
+      format(new Date(exec.created_date), 'yyyy-MM-dd'),
+      format(new Date(exec.created_date), 'HH:mm:ss'),
+      exec.execution_type,
+      exec.status,
+      exec.details?.opportunity?.buyDex && exec.details?.opportunity?.sellDex 
+        ? `${exec.details.opportunity.buyDex} -> ${exec.details.opportunity.sellDex}`
+        : 'N/A',
+      exec.profit_realized !== null && exec.profit_realized !== undefined ? exec.profit_realized.toFixed(2) : 'N/A',
+      exec.details?.loanAmount?.toLocaleString() || 'N/A',
+      exec.details?.tx_hash ? exec.details.tx_hash : exec.details?.message || 'N/A' // Prioritize tx_hash for CSV, then message
+    ]);
 
-  const volumeData = [
-    { exchange: 'Binance', volume: 12500 },
-    { exchange: 'Coinbase', volume: 8900 },
-    { exchange: 'Kraken', volume: 6700 },
-    { exchange: 'Uniswap', volume: 4200 },
-    { exchange: 'PancakeSwap', volume: 3100 },
-  ];
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')) // Handle commas and quotes in fields
+    ].join('\n');
 
-  const successRate = 87.5;
-  const avgProfit = 2.3;
-  const totalTrades = 156;
-  const bestDay = 520;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `bot-executions-${new Date().toISOString().split('T')[0]}.csv`); // Changed filename for general executions
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="flex justify-between items-center mb-8"
         >
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent mb-2">
-            Analytics Dashboard
-          </h1>
-          <p className="text-slate-600 font-medium">
-            Analyze your trading performance and market insights
-          </p>
+          <div>
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
+              Execution Database
+            </h1>
+            <p className="text-slate-600 mt-2 font-medium">
+              Raw execution data from your bot
+            </p>
+          </div>
+          
+          <div className="flex gap-3">
+            <Button
+              onClick={loadDatabaseData}
+              disabled={isLoading}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button
+              onClick={downloadCSV}
+              disabled={executions.length === 0}
+              className="bg-emerald-500 hover:bg-emerald-600 flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </Button>
+          </div>
         </motion.div>
 
-        {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Success Rate</p>
-                    <h3 className="text-2xl font-bold text-emerald-600">{successRate}%</h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600">
-                    <Target className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Avg Profit</p>
-                    <h3 className="text-2xl font-bold text-orange-600">{avgProfit}%</h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500">
-                    <TrendingUp className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Total Trades</p>
-                    <h3 className="text-2xl font-bold text-slate-900">{totalTrades}</h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600">
-                    <Calendar className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Best Day</p>
-                    <h3 className="text-2xl font-bold text-purple-600">${bestDay}</h3>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600">
-                    <DollarSign className="w-5 h-5 text-white" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-
-        {/* Charts */}
-        <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 bg-white/80 backdrop-blur-sm">
-            <TabsTrigger value="performance">Performance</TabsTrigger>
-            <TabsTrigger value="volume">Volume Analysis</TabsTrigger>
-            <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="performance">
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle>7-Day Profit Trend</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={profitData}>
-                      <XAxis 
-                        dataKey="date" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={(value) => `$${value}`}
-                      />
-                      <Tooltip 
-                        contentStyle={{
-                          backgroundColor: '#1e293b',
-                          border: 'none',
-                          borderRadius: '8px',
-                          color: '#fff'
-                        }}
-                        formatter={(value) => [`$${value}`, 'Profit']}
-                        labelFormatter={(label) => new Date(label).toLocaleDateString()}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="profit" 
-                        stroke="url(#profitGradient)" 
-                        strokeWidth={3}
-                        dot={{ fill: '#f97316', strokeWidth: 2, r: 6 }}
-                        activeDot={{ r: 8, fill: '#f97316' }}
-                      />
-                      <defs>
-                        <linearGradient id="profitGradient" x1="0" y1="0" x2="1" y2="0">
-                          <stop offset="0%" stopColor="#f97316" />
-                          <stop offset="100%" stopColor="#eab308" />
-                        </linearGradient>
-                      </defs>
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="volume">
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle>Trading Volume by Exchange</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={volumeData}>
-                      <XAxis 
-                        dataKey="exchange" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
-                      />
-                      <Tooltip 
-                        contentStyle={{
-                          backgroundColor: '#1e293b',
-                          border: 'none',
-                          borderRadius: '8px',
-                          color: '#fff'
-                        }}
-                        formatter={(value) => [`$${value.toLocaleString()}`, 'Volume']}
-                      />
-                      <Bar 
-                        dataKey="volume" 
-                        fill="url(#volumeGradient)"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <defs>
-                        <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3b82f6" />
-                          <stop offset="100%" stopColor="#06b6d4" />
-                        </linearGradient>
-                      </defs>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="opportunities">
-            <div className="grid md:grid-cols-2 gap-6">
-              <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Opportunity Sources</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">DEX Arbitrage</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div className="w-3/4 h-full bg-gradient-to-r from-blue-500 to-cyan-600" />
-                        </div>
-                        <span className="text-sm font-medium">75%</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">CEX Spreads</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div className="w-1/2 h-full bg-gradient-to-r from-orange-500 to-amber-500" />
-                        </div>
-                        <span className="text-sm font-medium">50%</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Cross-Chain</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div className="w-1/3 h-full bg-gradient-to-r from-purple-500 to-pink-600" />
-                        </div>
-                        <span className="text-sm font-medium">33%</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Risk Distribution</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                        <span className="text-slate-600">Low Risk</span>
-                      </div>
-                      <span className="font-medium">45%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-amber-500" />
-                        <span className="text-slate-600">Medium Risk</span>
-                      </div>
-                      <span className="font-medium">35%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500" />
-                        <span className="text-slate-600">High Risk</span>
-                      </div>
-                      <span className="font-medium">20%</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-        </Tabs>
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="w-5 h-5" />
+              Bot Execution History
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+                <div className="text-center py-12">Loading execution data...</div>
+            ) : executions.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Profit ($)</TableHead>
+                    <TableHead>Loan Amount ($)</TableHead>
+                    <TableHead>Details</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {executions.map((exec, index) => (
+                    <TableRow key={exec.id || index}>
+                      <TableCell>{format(new Date(exec.created_date), 'yyyy-MM-dd')}</TableCell>
+                      <TableCell>{format(new Date(exec.created_date), 'HH:mm:ss')}</TableCell>
+                      <TableCell><Badge variant="outline">{exec.execution_type}</Badge></TableCell>
+                      <TableCell><StatusBadge status={exec.status} /></TableCell>
+                      <TableCell>
+                        {exec.details?.opportunity?.buyDex && exec.details?.opportunity?.sellDex 
+                          ? `${exec.details.opportunity.buyDex} → ${exec.details.opportunity.sellDex}`
+                          : 'N/A'
+                        }
+                      </TableCell>
+                      <TableCell className={exec.profit_realized >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                        {exec.profit_realized !== null && exec.profit_realized !== undefined ? `$${exec.profit_realized.toFixed(2)}` : 'N/A'}
+                      </TableCell>
+                      <TableCell>${exec.details?.loanAmount?.toLocaleString() || 'N/A'}</TableCell>
+                      <TableCell>
+                        {exec.details?.tx_hash ? (
+                          <Button variant="ghost" size="sm" asChild>
+                            <a 
+                              href={`https://polygonscan.com/tx/${exec.details.tx_hash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              View Tx
+                            </a>
+                          </Button>
+                        ) : (
+                          exec.details?.message || 'No details'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-12">
+                <Database className="w-16 h-16 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">No execution data found</h3>
+                <p className="text-slate-600">Start your bot to begin recording execution data</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

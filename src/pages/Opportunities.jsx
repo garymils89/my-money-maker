@@ -1,178 +1,212 @@
-import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
-import { motion } from "framer-motion";
-import { Search, Filter, RefreshCw, AlertTriangle } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import React, { useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-import OpportunityCard from "../components/opportunities/OpportunityCard";
+import { 
+  Rocket,
+  CheckCircle,
+  AlertTriangle,
+  Settings,
+  Globe,
+  Shield,
+  Download,
+  ExternalLink
+} from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function Opportunities() {
-  const [opportunities, setOpportunities] = useState([]);
-  const [filteredOpportunities, setFilteredOpportunities] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [riskFilter, setRiskFilter] = useState("all");
-  const [minProfit, setMinProfit] = useState("");
+  const [deploymentStep, setDeploymentStep] = useState(1);
+  const [isDeploying, setIsDeploying] = useState(false);
 
-  useEffect(() => {
-    loadOpportunities();
-    // Auto-refresh every 15 seconds
-    const interval = setInterval(loadOpportunities, 15000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    filterOpportunities();
-  }, [opportunities, searchTerm, riskFilter, minProfit]);
-
-  const loadOpportunities = async () => {
-    try {
-      const data = await base44.entities.ArbitrageOpportunity.filter({ status: 'active' });
-      setOpportunities(data);
-    } catch (error) {
-      console.error("Error loading opportunities:", error);
-    } finally {
-      setIsLoading(false);
+  const deploymentSteps = [
+    {
+      id: 1,
+      title: "Environment Setup",
+      description: "Configure your production environment variables",
+      status: "pending",
+      details: [
+        "Set up Polygon mainnet RPC endpoint",
+        "Configure wallet private key securely",
+        "Set gas price and limit parameters",
+        "Enable production logging"
+      ]
+    },
+    {
+      id: 2,
+      title: "Smart Contract Deployment", 
+      description: "Deploy flashloan contracts to Polygon",
+      status: "pending",
+      details: [
+        "Deploy flashloan aggregator contract",
+        "Set up DEX router connections",
+        "Configure lending pool addresses",
+        "Test contract interactions"
+      ]
+    },
+    {
+      id: 3,
+      title: "Bot Configuration",
+      description: "Set production trading parameters",
+      status: "pending",
+      details: [
+        "Set conservative profit thresholds",
+        "Configure safety limits",
+        "Set up monitoring alerts",
+        "Enable emergency stop mechanisms"
+      ]
+    },
+    {
+      id: 4,
+      title: "Go Live",
+      description: "Launch your bot with real funds",
+      status: "pending",
+      details: [
+        "Start with minimal capital",
+        "Monitor first trades closely",
+        "Gradually increase position sizes",
+        "Scale based on performance"
+      ]
     }
-  };
+  ];
 
-  const filterOpportunities = () => {
-    let filtered = [...opportunities];
-
-    if (searchTerm) {
-      filtered = filtered.filter(opp => 
-        opp.pair.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        opp.buy_exchange.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        opp.sell_exchange.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (riskFilter !== "all") {
-      filtered = filtered.filter(opp => opp.risk_level === riskFilter);
-    }
-
-    if (minProfit) {
-      filtered = filtered.filter(opp => opp.profit_percentage >= parseFloat(minProfit));
-    }
-
-    // Sort by profit percentage descending
-    filtered.sort((a, b) => b.profit_percentage - a.profit_percentage);
-    
-    setFilteredOpportunities(filtered);
-  };
-
-  const handleExecuteTrade = (opportunity) => {
-    // This would integrate with exchange APIs
-    alert(`Would execute trade for ${opportunity.pair} with ${opportunity.profit_percentage.toFixed(2)}% profit`);
+  const handleDeploy = () => {
+    setIsDeploying(true);
+    // Simulate deployment process
+    setTimeout(() => {
+      setIsDeploying(false);
+      alert("Deployment simulation completed! In production, this would deploy your contracts and start the live bot.");
+    }, 3000);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4"
+          className="text-center mb-8"
         >
-          <div>
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg">
+              <Rocket className="w-8 h-8 text-white" />
+            </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Live Opportunities
+              Deploy to Production
             </h1>
-            <p className="text-slate-600 mt-2 font-medium">
-              {filteredOpportunities.length} active arbitrage opportunities detected
-            </p>
           </div>
-          
-          <Button
-            onClick={loadOpportunities}
-            disabled={isLoading}
-            className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <p className="text-xl text-slate-600 font-medium">
+            Launch your arbitrage bot on Polygon mainnet with real funds
+          </p>
         </motion.div>
 
-        {/* Filters */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 mb-8"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input
-                placeholder="Search pairs, exchanges..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
-            <Select value={riskFilter} onValueChange={setRiskFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Risk Level" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Risk Levels</SelectItem>
-                <SelectItem value="low">Low Risk</SelectItem>
-                <SelectItem value="medium">Medium Risk</SelectItem>
-                <SelectItem value="high">High Risk</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Input
-              placeholder="Min Profit %"
-              type="number"
-              step="0.1"
-              value={minProfit}
-              onChange={(e) => setMinProfit(e.target.value)}
-            />
-
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Filter className="w-4 h-4" />
-              <span>{filteredOpportunities.length} results</span>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Demo Alert */}
-        <Alert className="mb-6 border-blue-200 bg-blue-50">
+        {/* Current Status Alert */}
+        <Alert className="mb-8 border-amber-200 bg-amber-50">
           <AlertTriangle className="w-4 h-4" />
-          <AlertDescription className="text-blue-800">
-            <strong>Demo Data:</strong> These are simulated opportunities. In production, this would show real-time data from multiple exchanges.
+          <AlertDescription className="text-amber-800">
+            <strong>Demo Mode:</strong> This deployment wizard is for educational purposes. 
+            Real production deployment requires additional security measures and testing.
           </AlertDescription>
         </Alert>
 
-        {/* Opportunities Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredOpportunities.map((opportunity, index) => (
+        {/* Deployment Steps */}
+        <div className="space-y-6 mb-8">
+          {deploymentSteps.map((step, index) => (
             <motion.div
-              key={opportunity.id || index}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
+              key={step.id}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.1 }}
             >
-              <OpportunityCard
-                opportunity={opportunity}
-                onExecute={handleExecuteTrade}
-              />
+              <Card className={`bg-white/80 backdrop-blur-sm border-0 shadow-lg ${
+                deploymentStep === step.id ? 'ring-2 ring-orange-200' : ''
+              }`}>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        step.status === 'completed' ? 'bg-emerald-100' :
+                        deploymentStep === step.id ? 'bg-orange-100' : 'bg-slate-100'
+                      }`}>
+                        {step.status === 'completed' ? (
+                          <CheckCircle className="w-5 h-5 text-emerald-600" />
+                        ) : (
+                          <span className="font-bold text-sm">{step.id}</span>
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold">{step.title}</h3>
+                        <p className="text-sm text-slate-600">{step.description}</p>
+                      </div>
+                    </div>
+                    <Badge variant={
+                      step.status === 'completed' ? 'default' :
+                      deploymentStep === step.id ? 'secondary' : 'outline'
+                    }>
+                      {step.status === 'completed' ? 'Complete' :
+                       deploymentStep === step.id ? 'Active' : 'Pending'}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {step.details.map((detail, i) => (
+                      <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                        <div className="w-2 h-2 rounded-full bg-slate-300" />
+                        {detail}
+                      </li>
+                    ))}
+                  </ul>
+                  {deploymentStep === step.id && (
+                    <div className="mt-4 flex gap-3">
+                      <Button 
+                        size="sm"
+                        onClick={() => setDeploymentStep(step.id + 1)}
+                        disabled={step.id === 4}
+                      >
+                        {step.id === 4 ? 'Ready to Deploy' : 'Next Step'}
+                      </Button>
+                      {step.id === 4 && (
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          onClick={handleDeploy}
+                          disabled={isDeploying}
+                        >
+                          {isDeploying ? 'Deploying...' : '🚀 Deploy Live Bot'}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </motion.div>
           ))}
         </div>
 
-        {filteredOpportunities.length === 0 && !isLoading && (
-          <div className="text-center py-12">
-            <AlertTriangle className="w-16 h-16 text-slate-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-slate-900 mb-2">No opportunities found</h3>
-            <p className="text-slate-600">Try adjusting your filters or check back later.</p>
-          </div>
-        )}
+        {/* Resources */}
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle>Deployment Resources</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid md:grid-cols-3 gap-4">
+              <Button variant="outline" className="flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                Download Config
+              </Button>
+              <Button variant="outline" className="flex items-center gap-2">
+                <Globe className="w-4 h-4" />
+                Mainnet Guide
+              </Button>
+              <Button variant="outline" className="flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                Security Checklist
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

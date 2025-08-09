@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,12 +14,12 @@ import {
   TrendingUp,
   AlertTriangle,
   Zap,
-  Clock
+  Clock,
+  Info
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-export default function BotDashboard({ stats, wallet, botConfig, executions = [], onToggleBot, onUpdateConfig }) {
-  const [isRunning, setIsRunning] = useState(stats?.isRunning || false);
+export default function BotDashboard({ stats, wallet, botConfig, flashloanEnabled, onFlashloanToggle, isRunning }) {
   const [calculatedStats, setCalculatedStats] = useState({
     tradesExecuted: 0,
     successRate: 0,
@@ -26,9 +27,9 @@ export default function BotDashboard({ stats, wallet, botConfig, executions = []
     avgExecutionTime: 0
   });
 
-  // FIX: Use useCallback to create a stable function reference
   const calculateStats = useCallback(() => {
-    const trades = executions.filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade');
+    // Now using stats.trades as the source for execution data
+    const trades = (stats?.trades || []).filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade');
     const successful = trades.filter(e => e.status === 'completed');
     
     setCalculatedStats({
@@ -38,18 +39,11 @@ export default function BotDashboard({ stats, wallet, botConfig, executions = []
       avgExecutionTime: trades.length > 0 ? 
         trades.reduce((sum, t) => sum + (t.execution_time_ms || 0), 0) / trades.length : 0
     });
-  }, [executions]); // Only recreate when executions change
+  }, [stats?.trades]); // Dependency changed to stats.trades
 
-  // FIX: Now the dependency array is stable
   useEffect(() => {
     calculateStats();
-  }, [calculateStats]); // This won't cause infinite loops anymore
-
-  const handleToggleBot = () => {
-    const newStatus = !isRunning;
-    setIsRunning(newStatus);
-    if (onToggleBot) onToggleBot(newStatus);
-  };
+  }, [calculateStats]);
 
   const getStatusColor = () => {
     if (!isRunning) return 'bg-slate-500';
@@ -79,31 +73,33 @@ export default function BotDashboard({ stats, wallet, botConfig, executions = []
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm">
-                <Settings className="w-4 h-4 mr-2" />
-                Configure
-              </Button>
-              <Button 
-                onClick={handleToggleBot}
-                className={`${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}
-              >
-                {isRunning ? (
-                  <>
-                    <Pause className="w-4 h-4 mr-2" />
-                    Stop Bot
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 mr-2" />
-                    Start Bot
-                  </>
-                )}
-              </Button>
-            </div>
+            {/* The Configure button was removed as per the outline */}
           </div>
         </CardHeader>
+      </Card>
+
+      {/* Feature Controls */}
+      <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+        <CardHeader>
+          <CardTitle>Feature Controls</CardTitle>
+        </CardHeader>
+        <CardContent>
+           <div className="flex items-start justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <div className="flex-1">
+                <label htmlFor="flashloan-toggle" className="font-medium cursor-pointer">Enable Flashloan Trading</label>
+                <p className="text-sm text-slate-600 mt-1">
+                  This tells the running engine to execute flashloan opportunities. 
+                  It does not start or stop the main engine itself.
+                </p>
+              </div>
+              <Switch
+                id="flashloan-toggle"
+                checked={flashloanEnabled}
+                onCheckedChange={onFlashloanToggle}
+                disabled={!isRunning}
+              />
+            </div>
+        </CardContent>
       </Card>
 
       {/* Performance Stats */}
@@ -214,29 +210,33 @@ export default function BotDashboard({ stats, wallet, botConfig, executions = []
               <div className="text-lg font-semibold">{botConfig?.slippage_tolerance || 0.5}%</div>
             </div>
           </div>
-
-          {/* Wallet Balance Display */}
-          {wallet && (
-            <div className="mt-6 pt-4 border-t border-slate-200">
-              <h4 className="font-semibold mb-3">Wallet Status</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <div className="text-slate-600">USDC Balance</div>
-                  <div className="font-semibold">${(wallet.nativeUsdc + wallet.bridgedUsdc).toFixed(2)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-600">MATIC (Gas)</div>
-                  <div className="font-semibold">{wallet.matic.toFixed(4)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-600">Address</div>
-                  <div className="font-mono text-xs">{wallet.address?.substring(0, 10)}...{wallet.address?.slice(-6)}</div>
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
+
+      {/* Wallet Balance Display - Moved to its own card */}
+      {wallet && (
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+            <CardHeader>
+                <CardTitle>Wallet Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                        <div className="text-slate-600">USDC Balance</div>
+                        <div className="font-semibold">${(wallet.nativeUsdc + wallet.bridgedUsdc).toFixed(2)}</div>
+                    </div>
+                    <div>
+                        <div className="text-slate-600">MATIC (Gas)</div>
+                        <div className="font-semibold">{wallet.matic.toFixed(4)}</div>
+                    </div>
+                    <div>
+                        <div className="text-slate-600">Address</div>
+                        <div className="font-mono text-xs">{wallet.address?.substring(0, 10)}...{wallet.address?.slice(-6)}</div>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

@@ -1,157 +1,84 @@
 import { ethers } from "ethers";
+import { tradingSafety } from "./TradingSafetyLayer";
 
-// FIX: Use proper contract addresses instead of exchange names
-const DEX_ADDRESSES = {
-  uniswap: "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Uniswap V3 SwapRouter
-  sushiswap: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506", // SushiSwap Router
-  quickswap: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff", // QuickSwap Router
-  curve: "0x8F942C20D02bEfc377D41445793068908E2250D0" // Curve Router (example)
+const FLASHLOAN_CONTRACT_ADDRESS = "0xYourFlashloanContractAddress"; // Replace with your deployed contract
+const FLASHLOAN_ABI = [
+  "function executeSimpleArbitrage(address tokenIn, address tokenOut, uint256 amountIn, address dexA, address dexB) payable"
+];
+
+// FIX: Map the exchange names from opportunities to their actual router addresses
+const DEX_CONTRACTS = {
+  "Uniswap": "0xE592427A0AEce92De3Edee1F18E0157C05861564",    // Uniswap V3 Router
+  "Curve": "0x8F942C20D02bEfc377D41445793068908E2250D0",      // Curve 3Pool Router on Polygon
+  "QuickSwap": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",   // QuickSwap V2/V3 Router
+  "SushiSwap": "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",   // SushiSwap Router
+  "1inch": "0x1111111254fb6c44bAC0beD2854e76F90643097d",       // 1inch V4 Router
+  "PancakeSwap": "0x10ED43C718714eb63d5aA57B78B54704E256024E" // PancakeSwap Router
 };
 
-export class FlashloanEngine {
-  constructor(provider, wallet, config = {}) {
+class FlashloanEngine {
+  constructor(provider, wallet) {
+    if (!provider || !wallet) {
+      throw new Error("FlashloanEngine requires a provider and wallet.");
+    }
     this.provider = provider;
     this.wallet = wallet;
-    this.config = {
-      maxAmount: config.maxAmount || 10000,
-      feePercentage: config.feePercentage || 0.09,
-      provider: config.provider || 'aave',
-      ...config
-    };
-    
-    // Aave V3 Pool address on Polygon
-    this.aavePoolAddress = "0x794a61358D6845594F94dc1DB02A252b5b4814aD";
-    
-    // Simple ABI for flashloan
-    this.flashloanABI = [
-      "function flashLoanSimple(address receiverAddress, address asset, uint256 amount, bytes params, uint16 referralCode)"
-    ];
+    this.contract = new ethers.Contract(FLASHLOAN_CONTRACT_ADDRESS, FLASHLOAN_ABI, wallet);
   }
 
-  async validateFlashloanParams(asset, amount, buyExchange, sellExchange) {
-    // FIX: Validate addresses properly
-    if (!ethers.isAddress(asset)) {
-      throw new Error(`Invalid asset address: ${asset}`);
-    }
-    
-    // FIX: Get proper addresses for exchanges
-    const buyAddress = DEX_ADDRESSES[buyExchange.toLowerCase()];
-    const sellAddress = DEX_ADDRESSES[sellExchange.toLowerCase()];
-    
-    if (!buyAddress) {
-      throw new Error(`Unsupported buy exchange: ${buyExchange}`);
-    }
-    
-    if (!sellAddress) {
-      throw new Error(`Unsupported sell exchange: ${sellExchange}`);
-    }
+  async executeSimpleArbitrageFlashloan(opportunity, flashloanAmount) {
+    const { pair, buy_exchange, sell_exchange } = opportunity;
+    const [tokenA, tokenB] = pair.split('/');
 
-    if (amount <= 0 || amount > this.config.maxAmount) {
-      throw new Error(`Invalid flashloan amount: ${amount}`);
-    }
-
-    return { buyAddress, sellAddress };
-  }
-
-  async estimateFlashloanFee(asset, amount) {
     try {
-      const pool = new ethers.Contract(this.aavePoolAddress, this.flashloanABI, this.provider);
+      // FIX: Use the correct validation method from the safety layer
+      tradingSafety.validateTradeAmount(flashloanAmount, 'flashloan');
       
-      // Aave V3 flashloan fee is typically 0.05%
-      const feeAmount = (amount * 0.05) / 100;
-      
-      return {
-        feeAmount,
-        feePercentage: 0.05,
-        provider: 'aave'
-      };
-    } catch (error) {
-      // Fallback to config fee
-      return {
-        feeAmount: (amount * this.config.feePercentage) / 100,
-        feePercentage: this.config.feePercentage,
-        provider: this.config.provider
-      };
-    }
-  }
+      console.log("🚀 Executing flashloan for:", opportunity.pair);
 
-  async executeSimpleArbitrageFlashloan(opportunity, amount) {
-    const startTime = Date.now();
-    
-    try {
-      console.log(`⚡ FLASHLOAN: Starting ${opportunity.pair} arbitrage with $${amount}`);
-      
-      // FIX: Use USDC address instead of pair name for asset
-      const usdcAddress = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"; // Native USDC on Polygon
-      
-      // Validate parameters with proper addresses
-      const { buyAddress, sellAddress } = await this.validateFlashloanParams(
-        usdcAddress,
-        amount,
-        opportunity.buy_exchange,
-        opportunity.sell_exchange
+      // FIX: Handle missing DEX addresses gracefully
+      const buyDexAddress = DEX_CONTRACTS[buy_exchange];
+      const sellDexAddress = DEX_CONTRACTS[sell_exchange];
+
+      if (!buyDexAddress) {
+        throw new Error(`Unknown DEX: ${buy_exchange}. Available DEXs: ${Object.keys(DEX_CONTRACTS).join(', ')}`);
+      }
+      if (!sellDexAddress) {
+        throw new Error(`Unknown DEX: ${sell_exchange}. Available DEXs: ${Object.keys(DEX_CONTRACTS).join(', ')}`);
+      }
+
+      console.log(`📍 Using DEX addresses: ${buy_exchange} -> ${buyDexAddress}, ${sell_exchange} -> ${sellDexAddress}`);
+
+      // We'll simulate this since we don't have a live contract yet.
+      // In a real scenario, this is where you'd call the contract:
+      /*
+      const tx = await this.contract.executeSimpleArbitrage(
+        bridgedUsdcContract.address, // tokenIn (e.g., Bridged USDC)
+        nativeUsdcContract.address, // tokenOut (e.g., Native USDC)
+        ethers.parseUnits(flashloanAmount.toString(), 6), // amountIn (USDC has 6 decimals)
+        buyDexAddress, // Router address for the buy exchange
+        sellDexAddress, // Router address for the sell exchange
+        { gasLimit: 500000 } // Set an appropriate gas limit
       );
+      */
 
-      // Estimate fees
-      const feeInfo = await this.estimateFlashloanFee(usdcAddress, amount);
-      console.log(`💰 FLASHLOAN FEE: $${feeInfo.feeAmount.toFixed(2)} (${feeInfo.feePercentage}%)`);
-
-      // For development/testing, simulate the flashloan execution
-      const simulatedResult = await this.simulateFlashloanExecution(opportunity, amount, feeInfo);
+      // --- SIMULATION ---
+      const simulatedProfit = (opportunity.profit_percentage / 100) * flashloanAmount;
+      const simulatedGasCost = 0.55; // MATIC
+      const simulatedNetProfit = simulatedProfit - (simulatedGasCost * 1.20); // Assume MATIC price
       
+      console.log(`✅ SIMULATION: Gross profit would be ~$${simulatedProfit.toFixed(2)}`);
+
       return {
         success: true,
-        txHash: `0x${Math.random().toString(16).slice(2, 66)}`, // Simulated hash
-        netProfit: simulatedResult.profit - feeInfo.feeAmount,
-        gasUsed: simulatedResult.gasUsed,
-        executionTime: Date.now() - startTime,
-        feesPaid: feeInfo.feeAmount,
-        details: simulatedResult
+        profit: simulatedNetProfit,
+        transactionHash: `simulated_${Date.now()}`
       };
 
     } catch (error) {
-      console.error(`❌ FLASHLOAN FAILED [${process.env.NODE_ENV?.toUpperCase() || 'DEVELOPMENT'}]:`, error);
-      
-      return {
-        success: false,
-        error: error.message,
-        executionTime: Date.now() - startTime,
-        txHash: null,
-        netProfit: 0,
-        gasUsed: 0
-      };
+      console.error("❌ Flashloan failed:", error.message);
+      return { success: false, error: error.message };
     }
-  }
-
-  async simulateFlashloanExecution(opportunity, amount, feeInfo) {
-    // Simulate the arbitrage execution
-    const buyAmount = amount;
-    const expectedSellAmount = buyAmount * (1 + opportunity.profit_percentage / 100);
-    const profit = expectedSellAmount - buyAmount;
-    
-    // Simulate gas usage (typical flashloan + 2 swaps)
-    const gasUsed = 0.8; // MATIC
-    
-    console.log(`📊 SIMULATION: Buy $${buyAmount} → Sell $${expectedSellAmount.toFixed(2)} → Profit $${profit.toFixed(2)}`);
-    
-    return {
-      buyAmount,
-      sellAmount: expectedSellAmount,
-      profit: profit,
-      gasUsed: gasUsed,
-      slippage: 0.1, // 0.1% simulated slippage
-      success: profit > feeInfo.feeAmount // Profitable after fees
-    };
-  }
-
-  async getMaxFlashloanAmount(asset) {
-    // Return max amount based on environment safety limits
-    return this.config.maxAmount;
-  }
-
-  // Method to update configuration
-  updateConfig(newConfig) {
-    this.config = { ...this.config, ...newConfig };
   }
 }
 

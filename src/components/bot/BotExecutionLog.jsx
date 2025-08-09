@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +41,7 @@ export default function BotExecutionLog({ executions = [] }) {
             {executions.length > 0 ? (
               executions.map((execution, index) => (
                 <motion.div
-                  key={execution.id || `execution-${index}`}  // FIX: Added unique key
+                  key={execution.client_id || execution.id}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.05 }}

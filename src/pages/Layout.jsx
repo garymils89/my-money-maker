@@ -1,24 +1,20 @@
+
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  TrendingUp,
-  Target,
-  Wallet,
   BarChart3,
   DollarSign,
-  Activity,
-  Calculator,
-  Bot
+  Zap,
+  Database,
+  Rocket
 } from "lucide-react";
 
-// Simplified navigation items for local development
+// SIMPLIFIED - Only 4 pages you need to make money
 const navigationItems = [
   { title: "Dashboard", url: "/Dashboard", icon: BarChart3 },
-  { title: "Opportunities", url: "/Opportunities", icon: Target },
-  { title: "Trading Bot", url: "/Bot", icon: Bot },
-  { title: "Calculator", url: "/Calculator", icon: Calculator },
-  { title: "Portfolio", url: "/Portfolio", icon: Wallet },
-  { title: "Analytics", url: "/Analytics", icon: TrendingUp },
+  { title: "FlashLoan Bot", url: "/Bot", icon: Zap },
+  { title: "Database", url: "/Analytics", icon: Database }, // Keep title, change URL
+  { title: "Deploy", url: "/Opportunities", icon: Rocket }, // Keep title, change URL
 ];
 
 export default function Layout({ children }) {
@@ -35,7 +31,7 @@ export default function Layout({ children }) {
             </div>
             <div>
               <h2 className="font-bold text-xl">ArbitrageX</h2>
-              <p className="text-xs text-slate-400">USDC Trading Suite</p>
+              <p className="text-xs text-slate-400">Money Maker</p>
             </div>
           </div>
         </header>
@@ -63,11 +59,11 @@ export default function Layout({ children }) {
         <footer className="p-4 border-t border-slate-700/50">
            <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center">
-                <span className="font-bold text-sm">T</span>
+                <span className="font-bold text-sm">💰</span>
               </div>
               <div>
-                <p className="font-semibold text-sm">Local Dev</p>
-                <p className="text-xs text-slate-400">Bypassed Login</p>
+                <p className="font-semibold text-sm">Ready to Trade</p>
+                <p className="text-xs text-slate-400">Let's Make Money</p>
               </div>
             </div>
         </footer>

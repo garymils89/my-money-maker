@@ -1,68 +1,187 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Bot, Play, Pause, Settings, History, Zap, Shield, Activity } from "lucide-react";
-import BotDashboard from "../components/bot/BotDashboard";
-import LiveActivityFeed from "../components/bot/LiveActivityFeed";
-import BotConfigForm from "../components/bot/BotConfigForm";
-import RiskControls from "../components/bot/RiskControls";
-import BotExecutionLog from "../components/bot/BotExecutionLog";
-import { botStateManager } from "../components/bot/botState";
-import { BotEngine } from "../components/bot/BotEngine";
+import { Zap, Pause, BarChart3, Activity, Shield, Settings, SlidersHorizontal, History } from "lucide-react";
+import { botStateManager, BotEngine } from "@/components/bot/botState";
+import LiveActivityFeed from "@/components/bot/LiveActivityFeed";
+import StrategyConfig from "@/components/bot/StrategyConfig";
 import { Badge } from "@/components/ui/badge";
-import { tradingSafety } from "../components/bot/TradingSafetyLayer";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BotExecution } from "@/api/entities";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { format } from 'date-fns';
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+// --- Sub-Components for Tabs ---
+
+const BotDashboard = ({ stats }) => (
+    <Card>
+        <CardHeader><CardTitle>Bot Performance</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4">
+            <div className="bg-slate-50 p-3 rounded-lg">
+                <p className="text-sm text-slate-600">Today's P&L</p>
+                <p className={`text-xl font-bold ${stats.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>${stats.pnl.toFixed(2)}</p>
+            </div>
+             <div className="bg-slate-50 p-3 rounded-lg">
+                <p className="text-sm text-slate-600">Total Trades</p>
+                <p className="text-xl font-bold">{stats.trades}</p>
+            </div>
+             <div className="bg-slate-50 p-3 rounded-lg">
+                <p className="text-sm text-slate-600">Success Rate</p>
+                <p className="text-xl font-bold">{stats.successRate.toFixed(1)}%</p>
+            </div>
+             <div className="bg-slate-50 p-3 rounded-lg">
+                <p className="text-sm text-slate-600">Avg. Profit</p>
+                <p className="text-xl font-bold text-emerald-600">${stats.avgProfit.toFixed(2)}</p>
+            </div>
+        </CardContent>
+    </Card>
+);
+
+const HistoryLog = () => {
+    const [history, setHistory] = useState([]);
+    useEffect(() => {
+        const loadHistory = async () => {
+            const data = await BotExecution.list('-created_date', 100);
+            // FIX: Remove filter to show all activity
+            setHistory(data);
+        };
+        loadHistory();
+        
+        // Refresh every 30 seconds
+        const interval = setInterval(loadHistory, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
+    return (
+        <Card>
+            <CardHeader><CardTitle>Recent Bot History</CardTitle></CardHeader>
+            <CardContent>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Time</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Profit</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {history.length > 0 ? history.map(item => (
+                            <TableRow key={item.id}>
+                                <TableCell>{format(new Date(item.created_date), 'HH:mm:ss')}</TableCell>
+                                <TableCell><Badge variant="outline">{item.execution_type}</Badge></TableCell>
+                                <TableCell><Badge variant={item.status === 'completed' ? 'default' : 'destructive'}>{item.status}</Badge></TableCell>
+                                <TableCell className={item.profit_realized >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                                    {item.profit_realized !== null && item.profit_realized !== undefined ? `$${item.profit_realized.toFixed(2)}` : 'N/A'}
+                                </TableCell>
+                            </TableRow>
+                        )) : (
+                            <TableRow>
+                                <TableCell colSpan="4" className="text-center">No history yet. Start the bot.</TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
+    );
+};
+
+const RiskControls = () => (
+    <Card>
+        <CardHeader><CardTitle>Risk Controls</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+             <div>
+                <Label>Daily Loss Limit (USDC)</Label>
+                <Input defaultValue="50" disabled />
+            </div>
+            <div>
+                <Label>Max Slippage (%)</Label>
+                <Input defaultValue="0.5" disabled />
+            </div>
+        </CardContent>
+    </Card>
+);
+
+const FlashloanControls = ({ config, onConfigChange, isRunning }) => (
+     <Card>
+        <CardHeader><CardTitle>Flashloan Settings</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+            <div>
+                <Label>Loan Provider</Label>
+                <Select defaultValue="aave" disabled={isRunning}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="aave">AAVE V3</SelectItem>
+                        <SelectItem value="maker">MakerDAO</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+             <div>
+                <Label>Loan Amount (USDC)</Label>
+                <Input 
+                    type="number" 
+                    value={config.flashloanAmount} 
+                    onChange={(e) => onConfigChange({ ...config, flashloanAmount: parseFloat(e.target.value) })}
+                    disabled={isRunning} 
+                />
+            </div>
+        </CardContent>
+    </Card>
+);
+
+
+// --- Main Bot Page Component ---
 
 export default function BotPage() {
-  const [isRunning, setIsRunning] = useState(botStateManager.getState().isRunning);
-  const [isLive, setIsLive] = useState(botStateManager.getState().isLive);
-  const [wallet, setWallet] = useState({ address: '', nativeUsdc: 0, bridgedUsdc: 0, matic: 0 });
-  const [executions, setExecutions] = useState(botStateManager.getState().executions);
-  const [dailyStats, setDailyStats] = useState(botStateManager.getState().dailyStats || { trades: 0, profit: 0, loss: 0, gasUsed: 0 });
-
-  const [botConfig, setBotConfig] = useState({
-    bot_name: 'ArbitrageBot', min_profit_threshold: 0.2, max_position_size: 300,
-    max_daily_trades: 20, daily_loss_limit: 50, max_slippage_percentage: 0.5, stop_loss_percentage: 5
-  });
+  const [isFlashloanRunning, setIsFlashloanRunning] = useState(false);
+  const [executions, setExecutions] = useState([]);
+  const [botStats, setBotStats] = useState({ pnl: 0, trades: 0, successRate: 0, avgProfit: 0 });
   const [flashloanConfig, setFlashloanConfig] = useState({
-    enabled: true, amount: 5000, provider: 'aave', fee_percentage: 0.09
+    min_profit_threshold: 0.2,
+    flashloanAmount: 5000,
   });
 
   useEffect(() => {
-    const handleStateChange = (state) => {
-      setIsRunning(state.isRunning);
-      setIsLive(state.isLive);
-      setExecutions(state.executions);
-      if (state.dailyStats) setDailyStats(state.dailyStats);
-      // Wallet data needs to be added to state manager to be reflected here
-    };
-    const unsubscribe = botStateManager.subscribe(handleStateChange);
-    
-    // Pass initial config to engine
-    const initialFlashAmount = tradingSafety.getConfig().maxFlashloanAmount;
-    const initialFlashConfig = { ...flashloanConfig, amount: initialFlashAmount };
-    setFlashloanConfig(initialFlashConfig);
-    BotEngine.updateConfig(botConfig, initialFlashConfig);
+    const unsubscribe = botStateManager.subscribe((state) => {
+      setIsFlashloanRunning(state.activeStrategies.flashloan || false);
+      
+      const relevantExecutions = state.executions.filter(e => 
+        e.strategy_type === 'flashloan' || ['alert', 'error', 'scan'].includes(e.execution_type)
+      ).slice(0, 50); // Keep the feed snappy
+      setExecutions(relevantExecutions);
 
+      // Calculate stats
+      const trades = state.executions.filter(e => e.execution_type === 'flashloan_trade');
+      const successfulTrades = trades.filter(t => t.status === 'completed');
+      const totalPnl = successfulTrades.reduce((sum, t) => sum + (t.profit_realized || 0), 0);
+      
+      setBotStats({
+          pnl: totalPnl,
+          trades: trades.length,
+          successRate: trades.length > 0 ? (successfulTrades.length / trades.length) * 100 : 0,
+          avgProfit: successfulTrades.length > 0 ? totalPnl / successfulTrades.length : 0
+      });
+    });
+    
     return unsubscribe;
   }, []);
 
-  const handleBotConfigUpdate = (newConfig) => {
-    setBotConfig(newConfig);
-    BotEngine.updateConfig(newConfig, flashloanConfig);
-  };
-
-  const handleFlashloanConfigUpdate = (newConfig) => {
-    setFlashloanConfig(newConfig);
-    BotEngine.updateConfig(botConfig, newConfig);
-  };
-
-  const handleToggleBot = () => {
-    if (isRunning) {
-      BotEngine.stop();
+  const handleToggle = () => {
+    if (isFlashloanRunning) {
+      BotEngine.stop('flashloan');
     } else {
-      BotEngine.start();
+      BotEngine.start('flashloan');
     }
+  };
+
+  const handleConfigChange = (newConfig) => {
+    setFlashloanConfig(newConfig);
+    BotEngine.updateConfig('flashloan', newConfig);
   };
 
   return (
@@ -70,64 +189,57 @@ export default function BotPage() {
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Trading Bot Control Center
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-800 to-purple-600 bg-clip-text text-transparent">
+              Flashloan Arbitrage Bot
             </h1>
-            <p className="text-slate-600 mt-2 font-medium">Manage your automated arbitrage trading system</p>
+            <p className="text-slate-600 mt-2 font-medium">Executes complex, leveraged arbitrage using borrowed funds from lending protocols.</p>
           </div>
-          <div className="flex gap-3">
-            <Badge variant={isLive ? "default" : "secondary"} className={isLive ? "bg-emerald-100 text-emerald-800" : ""}>
-              {isLive ? "LIVE" : "OFFLINE"}
+          <div className="flex items-center gap-3">
+             <Badge variant={isFlashloanRunning ? "default" : "secondary"} className={isFlashloanRunning ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600"}>
+              {isFlashloanRunning ? "LIVE" : "STOPPED"}
             </Badge>
-            <Button onClick={handleToggleBot} className={`transition-all duration-300 ${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'}`}>
-              {isRunning ? (<><Pause className="w-4 h-4 mr-2" /><span>Stop Bot</span></>) : (<><Play className="w-4 h-4 mr-2" /><span>Start Bot</span></>)}
+            <Button
+              onClick={handleToggle}
+              className={`w-40 transition-all duration-300 ${isFlashloanRunning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'}`}
+            >
+              {isFlashloanRunning ? <><Pause className="w-4 h-4 mr-2" /> Stop Bot</> : <><Zap className="w-4 h-4 mr-2" /> Start Bot</>}
             </Button>
           </div>
         </div>
-
-        <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 bg-white/80 backdrop-blur-sm">
-            <TabsTrigger value="dashboard"><Bot className="w-4 h-4 mr-2" />Dashboard</TabsTrigger>
-            <TabsTrigger value="livefeed"><Activity className="w-4 h-4 mr-2" />Live Feed</TabsTrigger>
-            <TabsTrigger value="history"><History className="w-4 h-4 mr-2" />History</TabsTrigger>
-            <TabsTrigger value="config"><Settings className="w-4 h-4 mr-2" />Configuration</TabsTrigger>
-            <TabsTrigger value="risk"><Shield className="w-4 h-4 mr-2" />Risk Controls</TabsTrigger>
-            <TabsTrigger value="flashloan"><Zap className="w-4 h-4 mr-2" />Flashloan</TabsTrigger>
-          </TabsList>
-          <TabsContent value="dashboard"><BotDashboard stats={{ ...dailyStats, isRunning }} wallet={wallet} botConfig={botConfig} executions={executions} onToggleBot={handleToggleBot} /></TabsContent>
-          <TabsContent value="livefeed"><LiveActivityFeed executions={executions} isRunning={isRunning} /></TabsContent>
-          <TabsContent value="history"><BotExecutionLog executions={executions} /></TabsContent>
-          <TabsContent value="config"><BotConfigForm config={botConfig} onConfigUpdate={handleBotConfigUpdate} isRunning={isRunning} /></TabsContent>
-          <TabsContent value="risk"><RiskControls config={botConfig} onConfigUpdate={handleBotConfigUpdate} dailyStats={dailyStats} /></TabsContent>
-          <TabsContent value="flashloan">
-            <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
-              <CardHeader><CardTitle className="flex items-center gap-2"><Zap className="w-5 h-5 text-purple-500" />Flashloan Configuration</CardTitle></CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span>Enable Flashloan Trading</span>
-                    <input type="checkbox" checked={flashloanConfig.enabled} onChange={(e) => handleFlashloanConfigUpdate({ ...flashloanConfig, enabled: e.target.checked })} />
-                  </div>
-                  {flashloanConfig.enabled && (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Flashloan Amount (USDC)</label>
-                        <input type="number" value={flashloanConfig.amount} onChange={(e) => handleFlashloanConfigUpdate({ ...flashloanConfig, amount: parseFloat(e.target.value) })} className="w-full p-2 border rounded" max={tradingSafety.getConfig().maxFlashloanAmount} />
-                        <p className="text-xs text-slate-500 mt-1">Max allowed: ${tradingSafety.getConfig().maxFlashloanAmount} in {tradingSafety.getConfig().environment} mode</p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Provider</label>
-                        <select value={flashloanConfig.provider} onChange={(e) => handleFlashloanConfigUpdate({ ...flashloanConfig, provider: e.target.value })} className="w-full p-2 border rounded">
-                          <option value="aave">Aave</option>
-                          <option value="dydx">dYdX</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+        
+        <Tabs defaultValue="dashboard">
+            <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="dashboard"><BarChart3 className="w-4 h-4 mr-2"/>Dashboard</TabsTrigger>
+                <TabsTrigger value="feed"><Activity className="w-4 h-4 mr-2"/>Live Feed</TabsTrigger>
+                <TabsTrigger value="config"><Settings className="w-4 h-4 mr-2"/>Configuration</TabsTrigger>
+                <TabsTrigger value="risk"><Shield className="w-4 h-4 mr-2"/>Risk Controls</TabsTrigger>
+                <TabsTrigger value="history"><History className="w-4 h-4 mr-2"/>History</TabsTrigger>
+            </TabsList>
+            <TabsContent value="dashboard" className="mt-6">
+                <BotDashboard stats={botStats}/>
+            </TabsContent>
+            <TabsContent value="feed" className="mt-6">
+                <LiveActivityFeed executions={executions} isRunning={isFlashloanRunning} />
+            </TabsContent>
+            <TabsContent value="config" className="mt-6 grid md:grid-cols-2 gap-6">
+                <StrategyConfig 
+                    config={flashloanConfig}
+                    onConfigChange={handleConfigChange}
+                    strategyType="flashloan"
+                    isRunning={isFlashloanRunning}
+                />
+                <FlashloanControls 
+                    config={flashloanConfig}
+                    onConfigChange={handleConfigChange}
+                    isRunning={isFlashloanRunning}
+                />
+            </TabsContent>
+            <TabsContent value="risk" className="mt-6">
+                <RiskControls />
+            </TabsContent>
+            <TabsContent value="history" className="mt-6">
+                <HistoryLog />
+            </TabsContent>
         </Tabs>
       </div>
     </div>

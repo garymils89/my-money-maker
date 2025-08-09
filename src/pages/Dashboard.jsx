@@ -1,123 +1,80 @@
 import React, { useState, useEffect } from "react";
 import { BotExecution } from "@/api/entities";
 import { motion } from "framer-motion";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Bot, TrendingUp, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Bot } from "lucide-react";
-
 import StatsGrid from "../components/dashboard/StatsGrid";
-import LiveOpportunities from "../components/dashboard/LiveOpportunities";
 import MarketOverview from "../components/dashboard/MarketOverview";
 import { botStateManager } from "../components/bot/botState";
+
+const StrategyPerformanceCard = ({ title, stats, icon: Icon, colorClass }) => (
+  <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+    <CardHeader className="flex flex-row items-center justify-between pb-2">
+      <CardTitle className="text-sm font-medium">{title}</CardTitle>
+      <Icon className={`w-4 h-4 text-muted-foreground ${colorClass}`} />
+    </CardHeader>
+    <CardContent>
+      <div className="text-2xl font-bold">${stats.profit.toFixed(2)}</div>
+      <p className="text-xs text-muted-foreground">{stats.trades} trades</p>
+    </CardContent>
+  </Card>
+);
 
 export default function Dashboard() {
   const [executions, setExecutions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [walletBalance, setWalletBalance] = useState(0);
+  const [strategyStats, setStrategyStats] = useState({
+    arbitrage: { trades: 0, profit: 0 },
+    flashloan: { trades: 0, profit: 0 },
+  });
+  
+  const [overallStats, setOverallStats] = useState({
+    totalPortfolio: 0,
+    todayProfit: 0,
+    successRate: 0,
+    totalTrades: 0,
+  });
 
-  // FIX: Use subscribe-only pattern for state management
   useEffect(() => {
-    setIsLoading(true);
-    
-    // Subscribe to bot state updates. The manager will immediately send the current state.
     const unsubscribe = botStateManager.subscribe((state) => {
       setExecutions(state.executions);
-      setWalletBalance(state.walletBalance);
-      setLastUpdated(new Date());
+      setOverallStats(prev => ({ ...prev, totalPortfolio: state.walletBalance }));
       
-      // If we just got the initial state and it's empty, try loading from the DB.
-      if (state.executions.length === 0) {
-        loadFromDatabase();
-      } else {
-        setIsLoading(false);
-      }
+      // Calculate stats from executions
+      const completedTrades = state.executions.filter(e => e.status === 'completed' && (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'));
+      const totalTrades = state.executions.filter(e => e.execution_type === 'trade' || e.execution_type === 'flashloan_trade').length;
+      
+      const arbTrades = completedTrades.filter(t => t.strategy_type === 'arbitrage');
+      const flashTrades = completedTrades.filter(t => t.strategy_type === 'flashloan');
+      
+      const arbProfit = arbTrades.reduce((sum, t) => sum + (t.profit_realized || 0), 0);
+      const flashProfit = flashTrades.reduce((sum, t) => sum + (t.profit_realized || 0), 0);
+
+      setStrategyStats({
+        arbitrage: { trades: arbTrades.length, profit: arbProfit },
+        flashloan: { trades: flashTrades.length, profit: flashProfit },
+      });
+      
+      setOverallStats(prev => ({
+          ...prev,
+          todayProfit: arbProfit + flashProfit, // Simplified for now
+          totalTrades: totalTrades,
+          successRate: totalTrades > 0 ? (completedTrades.length / totalTrades) * 100 : 0
+      }));
+
+      setLastUpdated(new Date());
+      setIsLoading(false);
     });
-    
-    // Periodically try to sync from DB as a fallback.
-    const interval = setInterval(loadFromDatabase, 30000);
-    
-    return () => {
-      clearInterval(interval);
-      unsubscribe();
-    };
+
+    return unsubscribe;
   }, []);
 
-  const loadFromDatabase = async () => {
-    // Only fetch from DB if the live state is still empty.
-    if (botStateManager.getState().executions.length > 0) {
-      setIsLoading(false);
-      return;
-    }
-    
-    try {
-      console.log("Dashboard: state empty, loading from DB...");
-      const executionData = await BotExecution.list('-created_date', 1000);
-      
-      if (executionData && executionData.length > 0) {
-        // This will update the dashboard via the subscription.
-        botStateManager.setAllExecutions(executionData);
-      }
-      setLastUpdated(new Date());
-      console.log(`📊 Dashboard loaded from DB: ${executionData?.length || 0} executions`);
-    } catch (error) {
-      console.error("Error loading dashboard data from DB:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const chartData = processChartData(executions);
 
-  const calculateStats = (executions) => {
-    const trades = executions.filter(e =>
-      e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'
-    );
-
-    const completedTrades = trades.filter(e => e.status === 'completed');
-    const totalProfit = completedTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-    const totalTradesCount = trades.length;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayTrades = completedTrades.filter(e => new Date(e.created_date) >= today);
-    const todayProfit = todayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-    const yesterdayTrades = completedTrades.filter(e => {
-      const tradeDate = new Date(e.created_date);
-      return tradeDate >= yesterday && tradeDate < today;
-    });
-    const yesterdayProfit = yesterdayTrades.reduce((sum, trade) => sum + (trade.profit_realized || 0), 0);
-
-    let profitChange = 0;
-    if (yesterdayProfit > 0) {
-      profitChange = ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100;
-    } else if (todayProfit > 0) {
-      profitChange = 100;
-    }
-
-    const recentProfitableTrades = completedTrades.filter(e =>
-      new Date(e.created_date) > new Date(Date.now() - 15 * 60 * 1000)
-    );
-
-    const bestOppToday = todayTrades.length > 0
-      ? Math.max(...todayTrades.map(t => t.details?.opportunity?.profitPercentage || 0))
-      : 0;
-
-    return {
-      totalPortfolio: walletBalance,
-      portfolioChange: totalProfit > 0 ? 2.1 : -0.5,
-      activeOpportunities: recentProfitableTrades.length,
-      bestOpportunity: bestOppToday,
-      todayProfit,
-      profitChange: parseFloat(profitChange.toFixed(1)),
-      totalTrades: totalTradesCount,
-      successRate: totalTradesCount > 0 ? (completedTrades.length / totalTradesCount) * 100 : 0
-    };
-  };
-
-  const processChartData = (executions) => {
+  function processChartData(executions) {
     const trades = executions.filter(e => e.status === 'completed' && (e.execution_type === 'trade' || e.execution_type === 'flashloan_trade'));
     if (trades.length === 0) return [];
   
@@ -140,10 +97,7 @@ export default function Dashboard() {
         trades: tradesByDay[day].count
       };
     });
-  };
-
-  const stats = calculateStats(executions);
-  const chartData = processChartData(executions);
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -158,7 +112,7 @@ export default function Dashboard() {
               Trading Dashboard
             </h1>
             <p className="text-slate-600 mt-2 font-medium">
-              Live data from your bot - {executions.length} total events recorded
+              Aggregated performance from all active trading bots
             </p>
           </div>
 
@@ -169,7 +123,6 @@ export default function Dashboard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={loadFromDatabase}
               disabled={isLoading}
               className="flex items-center gap-2"
             >
@@ -179,29 +132,26 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {isLoading ? (
-          <Alert className="mb-6 border-blue-200 bg-blue-50">
-            <AlertDescription className="text-blue-800">
-              <strong>Loading live bot data...</strong>
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <Alert className="mb-6 border-emerald-200 bg-emerald-50">
-            <Bot className="w-4 h-4" />
-            <AlertDescription className="text-emerald-800">
-              <strong>Live Bot Data:</strong> This dashboard now shows real performance from your bot's execution history.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <StatsGrid stats={stats} />
+        <StatsGrid stats={overallStats} />
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <StrategyPerformanceCard 
+                title="Standard Arbitrage P&L"
+                stats={strategyStats.arbitrage}
+                icon={TrendingUp}
+                colorClass="text-emerald-500"
+            />
+            <StrategyPerformanceCard 
+                title="Flashloan P&L"
+                stats={strategyStats.flashloan}
+                icon={Zap}
+                colorClass="text-purple-500"
+            />
+        </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-3">
             <MarketOverview data={chartData} />
-          </div>
-          <div>
-            <LiveOpportunities executions={executions} />
           </div>
         </div>
       </div>
