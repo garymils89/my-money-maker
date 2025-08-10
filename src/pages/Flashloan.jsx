@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ export default function FlashloanPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [executions, setExecutions] = useState([]);
   const [config, setConfig] = useState({
-    min_profit_threshold: 0.2,
+    minProfitThreshold: 5, // Changed from min_profit_threshold and now represents dollars
     flashloanAmount: 50000,
     loanProvider: 'aave',
     dailyLossLimit: 100,
