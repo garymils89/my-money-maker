@@ -5,23 +5,20 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Rocket, 
   Shield, 
-  AlertTriangle, 
   TrendingUp,
-  Clock,
   DollarSign 
 } from "lucide-react";
 import { motion } from "framer-motion";
 import LiveTradingControls from "../components/bot/LiveTradingControls";
 import { botStateManager } from "../components/bot/botState";
 
-export default function LiveTradingPage() {
+export default function GoLivePage() {
   const [liveExecutions, setLiveExecutions] = useState([]);
   const [totalLiveProfit, setTotalLiveProfit] = useState(0);
   const [simulationStats, setSimulationStats] = useState({ trades: 0, profit: 0 });
 
   useEffect(() => {
     const unsubscribe = botStateManager.subscribe(state => {
-      // Get simulation data for comparison
       const simTrades = state.executions.filter(e => 
         e.execution_type === 'flashloan_trade' && e.status === 'completed'
       );
@@ -63,11 +60,11 @@ export default function LiveTradingPage() {
               <Rocket className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-              Live Trading Launch
+              🚨 LIVE TRADING 🚨
             </h1>
           </div>
           <p className="text-xl text-slate-600 font-medium">
-            Convert your simulation profits into real money
+            Execute real blockchain transactions and earn actual profits
           </p>
         </motion.div>
 
@@ -80,12 +77,10 @@ export default function LiveTradingPage() {
         </Alert>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Live Trading Controls */}
           <div className="lg:col-span-2">
             <LiveTradingControls onLiveTradeExecuted={handleLiveTradeExecuted} />
           </div>
 
-          {/* Live Results */}
           <div>
             <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
               <CardHeader>
@@ -123,7 +118,7 @@ export default function LiveTradingPage() {
                               {execution.success ? 'SUCCESS' : 'FAILED'}
                             </Badge>
                             <div className="text-xs text-slate-500">
-                              {execution.timestamp.toLocaleTimeString()}
+                              {new Date(execution.timestamp).toLocaleTimeString()}
                             </div>
                           </div>
                           <div className="text-right">
@@ -135,13 +130,20 @@ export default function LiveTradingPage() {
                       ))}
                     </div>
                   )}
+
+                  {liveExecutions.length === 0 && (
+                    <div className="text-center py-8 text-slate-500">
+                      <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p>No live trades executed yet</p>
+                      <p className="text-sm">Connect wallet to start live trading</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
         </div>
 
-        {/* Comparison Stats */}
         <div className="mt-8 grid md:grid-cols-2 gap-6">
           <Card className="bg-blue-50 border-blue-200">
             <CardHeader>

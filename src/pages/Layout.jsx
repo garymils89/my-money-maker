@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
+import { createPageUrl } from "@/utils";
 import {
   BarChart3,
   DollarSign,
@@ -9,18 +10,18 @@ import {
   Database,
   Rocket,
   FileText,
-  Shield // Added Shield icon for the new page
+  Shield
 } from "lucide-react";
 
 // SIMPLIFIED - Only 4 pages you need to make money
 const navigationItems = [
-  { title: "Dashboard", url: "/Dashboard", icon: BarChart3 },
-  { title: "FlashLoan Bot", url: "/Bot", icon: Zap },
-  { title: "Live Database", url: "/Analytics", icon: Database },
-  { title: "Portfolio", url: "/Portfolio", icon: FileText },
-  { title: "Deploy", url: "/Opportunities", icon: Rocket },
-  { title: "Live Setup", url: "/LiveTradingSetup", icon: Shield }, // New navigation item
-  { title: "🚨 GO LIVE", url: "/Ops", icon: DollarSign }, // New live trading page
+  { title: "Dashboard", url: createPageUrl("Dashboard"), icon: BarChart3 },
+  { title: "FlashLoan Bot", url: createPageUrl("Bot"), icon: Zap },
+  { title: "Live Database", url: createPageUrl("Analytics"), icon: Database },
+  { title: "Portfolio", url: createPageUrl("Portfolio"), icon: FileText },
+  { title: "Deploy", url: createPageUrl("Opportunities"), icon: Rocket },
+  { title: "Live Setup", url: createPageUrl("Setup"), icon: Shield },
+  { title: "🚨 GO LIVE", url: createPageUrl("Texastea"), icon: DollarSign },
 ];
 
 export default function Layout({ children }) {

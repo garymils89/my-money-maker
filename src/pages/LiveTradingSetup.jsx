@@ -18,21 +18,21 @@ import {
   Lock
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { botStateManager } from "../components/bot/botState"; // New import
+import { botStateManager } from "../components/bot/botState";
 
-export default function LiveTradingSetup() {
+export default function LiveTradingSetupPage() {
   const [setupProgress, setSetupProgress] = useState(0);
   const [walletConnected, setWalletConnected] = useState(false);
   const [rpcConnected, setRpcConnected] = useState(false);
-  const [contractsVerified, setContractsVerified] = useState(true); // Assume true for UI as per outline
-  const [safetyChecksEnabled, setSafetyChecksEnabled] = useState(true); // Assume true for UI as per outline
+  const [contractsVerified, setContractsVerified] = useState(true);
+  const [safetyChecksEnabled, setSafetyChecksEnabled] = useState(true);
   
-  const [walletBalance, setWalletBalance] = useState({ usdc: 0, matic: 0 }); // matic initial remains 0, updated by botState for usdc
+  const [walletBalance, setWalletBalance] = useState({ usdc: 0, matic: 0 });
   const [testResults, setTestResults] = useState(null);
   
   const [config, setConfig] = useState({
     enable_live_trading: false,
-    max_trade_size_live: 100, // Start small for live
+    max_trade_size_live: 100,
     emergency_stop_loss: 50,
     max_daily_loss_live: 100,
     require_confirmation: true,
@@ -40,27 +40,21 @@ export default function LiveTradingSetup() {
   });
 
   useEffect(() => {
-    // Subscribe to botStateManager for real-time wallet and connection status
     const unsubscribe = botStateManager.subscribe(state => {
-      // For this page, we'll use the bot's reported wallet balance to infer connection status.
-      // If the bot has a USDC balance, we consider the wallet and RPC connected.
       const isConnected = state.walletBalance > 0;
       setWalletConnected(isConnected);
       setRpcConnected(isConnected);
-      setWalletBalance(prev => ({ ...prev, usdc: state.walletBalance })); // Update USDC balance
+      setWalletBalance(prev => ({ ...prev, usdc: state.walletBalance }));
 
-      // Recalculate progress based on current statuses
-      const checks = [isConnected, isConnected, contractsVerified, safetyChecksEnabled]; // rpcConnected and walletConnected use isConnected
+      const checks = [isConnected, isConnected, contractsVerified, safetyChecksEnabled];
       const progress = (checks.filter(Boolean).length / checks.length) * 100;
       setSetupProgress(progress);
     });
 
-    // Cleanup subscription on component unmount
     return unsubscribe;
-  }, [contractsVerified, safetyChecksEnabled]); // Dependencies for useEffect to react to these states if they were to change
+  }, [contractsVerified, safetyChecksEnabled]);
 
   const runLiveTest = async () => {
-    // Simulate a small live test transaction
     setTestResults({
       status: 'running',
       message: 'Testing live blockchain connection...'
@@ -83,7 +77,7 @@ export default function LiveTradingSetup() {
     }
     
     setConfig(prev => ({ ...prev, enable_live_trading: true }));
-    alert("Live trading enabled! The bot will now execute real transactions.");
+    alert("Live trading enabled! Go to the '🚨 GO LIVE' page to start trading.");
   };
 
   const StatusCard = ({ title, status, icon: Icon, description }) => (
@@ -118,14 +112,14 @@ export default function LiveTradingSetup() {
         >
           <div className="flex items-center justify-center gap-3 mb-4">
             <div className="p-4 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl shadow-lg">
-              <Zap className="w-8 h-8 text-white" />
+              <Shield className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
               Live Trading Setup
             </h1>
           </div>
           <p className="text-xl text-slate-600 font-medium">
-            Prepare your bot for real blockchain transactions
+            Prepare your systems for real blockchain transactions
           </p>
         </motion.div>
 
@@ -301,7 +295,7 @@ export default function LiveTradingSetup() {
                   <Alert className="border-green-200 bg-green-50">
                     <CheckCircle className="w-4 h-4" />
                     <AlertDescription className="text-green-800">
-                      <strong>Live Trading Active!</strong> Your bot is now executing real transactions.
+                      <strong>Setup Complete!</strong> Go to the "🚨 GO LIVE" page to start live trading.
                     </AlertDescription>
                   </Alert>
                 ) : (
