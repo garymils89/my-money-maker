@@ -1,4 +1,5 @@
 
+
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -19,6 +20,7 @@ const navigationItems = [
   { title: "Portfolio", url: "/Portfolio", icon: FileText },
   { title: "Deploy", url: "/Opportunities", icon: Rocket },
   { title: "Live Setup", url: "/LiveTradingSetup", icon: Shield }, // New navigation item
+  { title: "🚨 GO LIVE", url: "/LiveTrading", icon: DollarSign }, // New live trading page
 ];
 
 export default function Layout({ children }) {
@@ -80,3 +82,4 @@ export default function Layout({ children }) {
     </div>
   );
 }
+
