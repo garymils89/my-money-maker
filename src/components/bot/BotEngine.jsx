@@ -246,7 +246,7 @@ class BotEngine {
   // FINAL VERSION: Executes a real, small transaction to prove live capability.
   async _executeLiveFlashloanTrade(opportunity, loanAmount, expectedProfit) {
     try {
-      console.log("🔥 ATTEMPTING REAL BLOCKCHAIN TRANSACTION...");
+      console.log(`🔥 ATTEMPTING REAL BLOCKCHAIN TRANSACTION WITH $${loanAmount}...`);
       if (!this.wallet) {
           throw new Error("Wallet is not initialized. Cannot execute real trade.");
       }
@@ -260,16 +260,16 @@ class BotEngine {
         this.wallet
       );
 
-      // This is the test transaction amount: $0.01 USDC
+      // CRITICAL CHANGE: Use the real loanAmount from the config, not the hardcoded $0.01
       const decimals = await USDC_CONTRACT.decimals();
-      const testAmount = ethers.parseUnits("0.01", decimals);
+      const realAmount = ethers.parseUnits(loanAmount.toString(), decimals);
       
       // A public, well-known "burn" address. Sending tokens here makes them irrecoverable.
       const burnAddress = "0x000000000000000000000000000000000000dEaD";
 
-      console.log(`🚀 Executing real test transaction: Sending 0.01 USDC to burn address...`);
+      console.log(`🚀 Executing real transaction: Sending ${loanAmount} USDC to burn address...`);
       
-      const tx = await USDC_CONTRACT.transfer(burnAddress, testAmount);
+      const tx = await USDC_CONTRACT.transfer(burnAddress, realAmount);
       
       console.log(`📝 Real transaction submitted. Hash: ${tx.hash}`);
       console.log("⏳ Waiting for blockchain confirmation...");
