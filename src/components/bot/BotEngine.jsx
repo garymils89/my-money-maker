@@ -278,7 +278,7 @@ class BotEngine {
       
       console.log(`✅ Real transaction CONFIRMED in block ${receipt.blockNumber}`);
       
-      const actualGasUsed = parseFloat(ethers.formatEther(receipt.gasUsed * receipt.effectiveGasPrice));
+      const actualGasUsed = parseFloat(ethers.formatEther(BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)));
 
       // The PROFIT is from the SIMULATED opportunity the bot found.
       // The TRANSACTION is the REAL proof that the bot is live.
